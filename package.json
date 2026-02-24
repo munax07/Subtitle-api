@@ -1,0 +1,17 @@
+{
+  "name": "opensubtitles-proxy",
+  "version": "1.0.0",
+  "description": "Simple Express server for OpenSubtitles search and download",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "express": "^4.21.1"
+  },
+  "keywords": ["opensubtitles", "subtitles", "express", "proxy"],
+  "author": "",
+  "license": "MIT"
+}
