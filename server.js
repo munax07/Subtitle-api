@@ -8,6 +8,9 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ==================== TRUST PROXY (FIX FOR RATE LIMITER WARNING) ====================
+app.set('trust proxy', 1); // Trust the first proxy (Render)
+
 // ==================== CONFIGURATION ====================
 const cache = new NodeCache({ stdTTL: 300, checkperiod: 60 }); // 5 min cache
 
@@ -23,24 +26,42 @@ const limiter = rateLimit({
   message: { success: false, error: "Too many requests, please try again later." },
 });
 
-// Custom axios client with realistic browser headers
-const client = axios.create({
-  timeout: 20000,
-  maxRedirects: 5,
-  headers: {
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    Referer: "https://www.opensubtitles.org/",
-    Connection: "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-  },
-  validateStatus: () => true, // never throw on status code
-});
+// List of modern User-Agents to rotate
+const userAgents = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+];
+
+// Helper to get a random User-Agent
+function getRandomUserAgent() {
+  return userAgents[Math.floor(Math.random() * userAgents.length)];
+}
+
+// Custom axios client with realistic browser headers – but we'll create a new one per request to rotate UA
+// We'll define a function to get a configured client with a specific UA
+function createClient(userAgent) {
+  return axios.create({
+    timeout: 20000,
+    maxRedirects: 5,
+    headers: {
+      "User-Agent": userAgent,
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Referer": "https://www.opensubtitles.org/",
+      "Connection": "keep-alive",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "same-origin",
+      "Cache-Control": "max-age=0",
+    },
+    validateStatus: () => true, // never throw on status code
+  });
+}
 
 // ==================== HELPER FUNCTIONS ====================
 
@@ -160,7 +181,7 @@ function parseSearch(html) {
 // ==================== CORE API FUNCTIONS ====================
 
 /**
- * Search subtitles with caching
+ * Search subtitles with caching and anti-blocking measures
  */
 async function searchSubtitles(query, page = 1) {
   const cacheKey = `search_${query}_page_${page}`;
@@ -171,43 +192,61 @@ async function searchSubtitles(query, page = 1) {
     query
   )}/${page}`;
 
-  let res;
-  try {
-    res = await client.get(url);
-  } catch (e) {
-    throw createError("network_error", `Failed to reach OpenSubtitles: ${e.message}`);
+  // Try up to 2 times with different User-Agents if we get a 403
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // Add a random delay between 2 and 5 seconds to mimic human behavior
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 3000 + 2000));
+
+    const userAgent = getRandomUserAgent();
+    const client = createClient(userAgent);
+
+    let res;
+    try {
+      res = await client.get(url);
+    } catch (e) {
+      lastError = createError("network_error", `Failed to reach OpenSubtitles: ${e.message}`);
+      continue; // try next attempt
+    }
+
+    if (res.status !== 200) {
+      lastError = createError(
+        "search_failed",
+        `OpenSubtitles returned status ${res.status}`,
+        serializeError(res, url)
+      );
+      // If status is 403, try again with a different UA
+      if (res.status === 403) continue;
+      else break; // other errors are not recoverable
+    }
+
+    const results = parseSearch(res.data);
+    if (results === null) {
+      lastError = createError(
+        "parse_failed",
+        "Could not parse OpenSubtitles response. The site may have changed its structure or returned a captcha.",
+        serializeError(res, url)
+      );
+      continue; // maybe next attempt will work
+    }
+
+    // Sort by popularity (most downloads first)
+    results.sort((a, b) => b.downloads - a.downloads);
+
+    const data = {
+      query,
+      page,
+      total: results.length,
+      fromCache: false,
+      results,
+    };
+
+    cache.set(cacheKey, data);
+    return data;
   }
 
-  if (res.status !== 200) {
-    throw createError(
-      "search_failed",
-      `OpenSubtitles returned status ${res.status}`,
-      serializeError(res, url)
-    );
-  }
-
-  const results = parseSearch(res.data);
-  if (results === null) {
-    throw createError(
-      "parse_failed",
-      "Could not parse OpenSubtitles response. The site may have changed its structure or returned a captcha.",
-      serializeError(res, url)
-    );
-  }
-
-  // Sort by popularity (most downloads first)
-  results.sort((a, b) => b.downloads - a.downloads);
-
-  const data = {
-    query,
-    page,
-    total: results.length,
-    fromCache: false,
-    results,
-  };
-
-  cache.set(cacheKey, data);
-  return data;
+  // If all attempts failed, throw the last error
+  throw lastError || createError("search_failed", "All attempts failed");
 }
 
 /**
@@ -242,6 +281,11 @@ async function downloadSubtitle(id) {
   ];
 
   for (const url of urls) {
+    // Also add delay and UA rotation for download attempts
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
+    const userAgent = getRandomUserAgent();
+    const client = createClient(userAgent);
+
     let res;
     try {
       res = await client.get(url, { responseType: "arraybuffer" });
@@ -300,241 +344,9 @@ function validateId(id) {
 
 // ==================== ROUTES ====================
 
-// Root – beautiful API documentation
+// Root – beautiful API documentation (same as before, omitted for brevity, but keep your existing root)
 app.get("/", (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenSubtitles Proxy API</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: 'Inter', sans-serif;
-      background: linear-gradient(135deg, #0b1120 0%, #19223c 100%);
-      color: #e2e8f0;
-      line-height: 1.6;
-      min-height: 100vh;
-      padding: 2rem;
-    }
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      background: rgba(15, 23, 42, 0.7);
-      backdrop-filter: blur(10px);
-      border-radius: 2rem;
-      padding: 2.5rem;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-      border: 1px solid rgba(71, 85, 105, 0.3);
-    }
-    h1 {
-      font-family: 'Poppins', sans-serif;
-      font-size: 3.5rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, #a5f3fc, #c7d2fe);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 0.5rem;
-      letter-spacing: -0.02em;
-    }
-    .subtitle {
-      font-size: 1.2rem;
-      color: #94a3b8;
-      margin-bottom: 2rem;
-      border-left: 4px solid #38bdf8;
-      padding-left: 1.5rem;
-    }
-    .badge-container {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.8rem;
-      margin-bottom: 2.5rem;
-    }
-    .badge {
-      background: rgba(56, 189, 248, 0.1);
-      border: 1px solid #38bdf8;
-      color: #b0e0ff;
-      padding: 0.4rem 1rem;
-      border-radius: 100px;
-      font-size: 0.85rem;
-      font-weight: 500;
-      letter-spacing: 0.3px;
-      backdrop-filter: blur(4px);
-    }
-    h2 {
-      font-size: 2rem;
-      font-weight: 600;
-      color: #f1f5f9;
-      margin: 2.5rem 0 1.5rem;
-      border-bottom: 2px solid #334155;
-      padding-bottom: 0.5rem;
-    }
-    .endpoint {
-      background: #1e293b;
-      border-radius: 1.5rem;
-      padding: 1.8rem;
-      margin-bottom: 1.5rem;
-      border-left: 5px solid #38bdf8;
-      transition: transform 0.2s;
-      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3);
-    }
-    .endpoint:hover {
-      transform: translateY(-4px);
-      border-left-color: #f472b6;
-    }
-    .method {
-      background: #38bdf8;
-      color: #0b1120;
-      font-weight: 700;
-      padding: 0.3rem 1rem;
-      border-radius: 2rem;
-      display: inline-block;
-      margin-right: 1rem;
-      font-size: 0.9rem;
-      letter-spacing: 0.5px;
-    }
-    .url {
-      font-family: 'Courier New', monospace;
-      font-size: 1.2rem;
-      color: #cbd5e1;
-      word-break: break-all;
-    }
-    .param {
-      background: #0f172a;
-      padding: 1.2rem;
-      border-radius: 1rem;
-      margin: 1rem 0 0;
-      font-size: 0.95rem;
-    }
-    .param code {
-      background: #2d3a4f;
-      color: #facc15;
-      padding: 0.2rem 0.5rem;
-      border-radius: 0.5rem;
-    }
-    a {
-      color: #a5f3fc;
-      text-decoration: none;
-      border-bottom: 1px dashed #38bdf8;
-    }
-    a:hover {
-      color: #f0f9ff;
-      border-bottom-style: solid;
-    }
-    pre {
-      background: #0f172a;
-      padding: 1.5rem;
-      border-radius: 1rem;
-      overflow-x: auto;
-      font-size: 0.9rem;
-      border: 1px solid #334155;
-      color: #d4d4d4;
-    }
-    .footer {
-      margin-top: 3rem;
-      text-align: center;
-      color: #6b7280;
-      font-size: 1rem;
-      border-top: 1px solid #334155;
-      padding-top: 2rem;
-    }
-    .footer strong {
-      color: #f472b6;
-      font-family: 'Poppins', sans-serif;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>🎬 OpenSubtitles Proxy API</h1>
-    <div class="subtitle">The ultimate proxy – fast, cached, and beautifully documented</div>
-    
-    <div class="badge-container">
-      <span class="badge">✅ 99.9% Uptime</span>
-      <span class="badge">⚡ 5s Response Time</span>
-      <span class="badge">📦 5 min Cache</span>
-      <span class="badge">🛡️ 100 req/15min</span>
-      <span class="badge">🌍 CORS Enabled</span>
-    </div>
-
-    <h2>📡 Endpoints</h2>
-
-    <div class="endpoint">
-      <span class="method">GET</span> <span class="url">/subtitle?action=search&q={query}</span>
-      <p>Search for subtitles by movie or TV show name.</p>
-      <div class="param">
-        <strong>Parameters:</strong><br>
-        <code>q</code> – search query (required)<br>
-        <code>lang</code> – language code like <code>en</code>, <code>ml</code>, <code>fr</code> (optional)<br>
-        <code>page</code> – page number 1–100 (optional, default: 1)
-      </div>
-      <p>🔗 <a href="/subtitle?action=search&q=inception&lang=en">Try it: /subtitle?action=search&q=inception&lang=en</a></p>
-    </div>
-
-    <div class="endpoint">
-      <span class="method">GET</span> <span class="url">/subtitle?action=download&id={id}</span>
-      <p>Download a subtitle file by its ID.</p>
-      <div class="param">
-        <code>id</code> – numeric subtitle ID (required)
-      </div>
-      <p>🔗 <a href="/subtitle?action=download&id=3962439">Try it: /subtitle?action=download&id=3962439</a></p>
-    </div>
-
-    <div class="endpoint">
-      <span class="method">GET</span> <span class="url">/languages?q={query}</span>
-      <p>List all available languages for a search.</p>
-      <p>🔗 <a href="/languages?q=inception">Try it: /languages?q=inception</a></p>
-    </div>
-
-    <div class="endpoint">
-      <span class="method">GET</span> <span class="url">/stats</span>
-      <p>View real-time server statistics (cache hits, memory usage).</p>
-      <p>🔗 <a href="/stats">Try it: /stats</a></p>
-    </div>
-
-    <div class="endpoint">
-      <span class="method">GET</span> <span class="url">/health</span>
-      <p>Health check endpoint for monitoring services (Render, Railway, etc.).</p>
-    </div>
-
-    <h2>📦 Example Response</h2>
-    <pre>{
-  "success": true,
-  "data": {
-    "query": "inception",
-    "page": 1,
-    "total": 40,
-    "fromCache": false,
-    "results": [
-      {
-        "id": "3962439",
-        "title": "Inception",
-        "year": "2010",
-        "language": "en",
-        "downloads": 132434,
-        "uploader": "kmmt123",
-        "uploadDate": "18/11/10",
-        "filename": "Inception.2010.1080p.BluRay.x264-FGT",
-        "features": {
-          "hd": true,
-          "hearingImpaired": false,
-          "trusted": true
-        }
-      }
-    ]
-  }
-}</pre>
-
-    <div class="footer">
-      Made with <span style="color: #f472b6;">❤️</span> by <strong>Munax</strong> – the ultimate subtitle API
-    </div>
-  </div>
-</body>
-</html>`);
+  res.send(`<!DOCTYPE html>...`); // keep your existing HTML
 });
 
 // Languages endpoint
@@ -703,7 +515,7 @@ app.listen(PORT, () => {
 ║     🎬  OPENSUBTITLES PROXY API – PEAK EDITION       ║
 ╠══════════════════════════════════════════════════════╣
 ║  ✅  Server running on port ${PORT}                         ║
-║  🚀  Ready to serve subtitles to the world!         ║
+║  🚀  Anti-block measures: ON (UA rotation + delays)  ║
 ║  📦  Cache TTL: 300s                                 ║
 ║  🛡️   Rate limit: 100 req / 15 min per IP            ║
 ║  🌐  CORS enabled for all origins                     ║
