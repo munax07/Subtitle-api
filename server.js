@@ -1,100 +1,84 @@
-const express = require('express');
-const axios = require('axios');
-const cheerio = require('cheerio');
-
+const express = require("express");
+const axios = require("axios");
+const cheerio = require("cheerio");
+ 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// ------------------------------------------------------------
-// Provided functions (unchanged)
-// ------------------------------------------------------------
-function parseSubtitleSearch(html) {
-  if (!html || typeof html !== "string") {
-    console.error("Invalid HTML passed to parseSubtitleSearch:", typeof html);
-    return [];
-  }
-
+ 
+const client = axios.create({
+  timeout: 20000,
+  maxRedirects: 5,
+  headers: {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    Referer: "https://www.opensubtitles.org/",
+    Connection: "keep-alive",
+  },
+  validateStatus: () => true,
+});
+ 
+function serializeError(res, url) {
+  return {
+    status: res && res.status,
+    statusText: res && res.statusText,
+    url: url,
+    headers: res && res.headers,
+    body:
+      typeof res?.data === "string"
+        ? res.data.slice(0, 3000)
+        : res?.data || null,
+  };
+}
+ 
+function parseSearch(html) {
+  if (!html) return [];
+ 
   const $ = cheerio.load(html);
-  const results = [];
-
-  $("#search_results tbody tr").each((i, row) => {
-    const $row = $(row);
-
+  const list = [];
+ 
+  $("#search_results tbody tr").each((_, row) => {
+    const r = $(row);
+ 
     if (
-      $row.hasClass("head") ||
-      $row.attr("style") === "display:none" ||
-      !$row.attr("onclick")
-    ) {
+      r.hasClass("head") ||
+      r.attr("style") === "display:none" ||
+      !r.attr("onclick")
+    )
       return;
-    }
-
-    const onclick = $row.attr("onclick") || "";
+ 
     const idMatch =
-      onclick.match(/servOC\((\d+)/) ||
-      $row.attr("id")?.match(/name(\d+)/);
-
+      r.attr("onclick")?.match(/servOC\((\d+)/) ||
+      r.attr("id")?.match(/name(\d+)/);
+ 
     if (!idMatch) return;
+ 
     const id = idMatch[1];
-
-    const titleElement = $row
-      .find("td:first-child strong a")
-      .first();
-
-    let title = titleElement.text().trim();
+ 
+    let title = r.find("td:first-child strong a").text().trim();
     let year = null;
-
-    const yearMatch = title.match(/\((\d{4})\)$/);
-    if (yearMatch) {
-      year = yearMatch[1];
-      title = title.replace(/\s*\(\d{4}\)$/, "").trim();
+ 
+    const ym = title.match(/\((\d{4})\)$/);
+    if (ym) {
+      year = ym[1];
+      title = title.replace(/\s*\(\d{4}\)$/, "");
     }
-
+ 
     let language = "unknown";
-    const flag = $row.find(".flag").first();
-    if (flag.length) {
-      const flagClass = flag.attr("class") || "";
-      const langMatch = flagClass.match(/flag\s+([a-z]{2})/);
-      if (langMatch) language = langMatch[1];
-    }
-
+    const flag = r.find(".flag").attr("class") || "";
+    const lm = flag.match(/flag\s+([a-z]{2})/);
+    if (lm) language = lm[1];
+ 
     let downloads = 0;
-    const downloadLink = $row
-      .find('a[href*="subtitleserve"]')
-      .first();
-
-    if (downloadLink.length) {
-      const dlText = downloadLink.text().trim().replace("x", "");
-      downloads = parseInt(dlText) || 0;
-    }
-
-    let uploader = "anonymous";
-    const uploaderLink = $row
-      .find("td:last-child a")
-      .first();
-
-    if (uploaderLink.length) {
-      uploader = uploaderLink.text().trim() || "anonymous";
-    }
-
-    let uploadDate = null;
-    const timeEl = $row.find("time").first();
-    if (timeEl.length) {
-      uploadDate = timeEl.text().trim();
-    }
-
-    const features = {
-      hd: $row.find('img[src*="hd.gif"]').length > 0,
-      hearingImpaired:
-        $row.find('img[src*="hearing_impaired.gif"]').length > 0,
-      trusted:
-        $row.find('img[src*="from_trusted.gif"]').length > 0,
-    };
-
-    let filename = null;
-    const span = $row.find("span[title]").first();
-    if (span.length) filename = span.attr("title") || null;
-
-    results.push({
+    const dltxt = r.find('a[href*="subtitleserve"]').text();
+    if (dltxt) downloads = parseInt(dltxt.replace("x", "")) || 0;
+ 
+    const uploader = r.find("td:last-child a").text().trim() || "anonymous";
+    const uploadDate = r.find("time").text().trim() || null;
+ 
+    list.push({
       id,
       title,
       year,
@@ -102,153 +86,111 @@ function parseSubtitleSearch(html) {
       downloads,
       uploader,
       uploadDate,
-      filename,
-      features,
     });
   });
-
-  return results;
+ 
+  return list;
 }
-
-async function searchSubtitles(q) {
-  if (!q) throw new Error("Query is required");
-
-  const searchUrl = `https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-${encodeURIComponent(q)}`;
-
-  const response = await axios.get(searchUrl, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-    },
-  });
-
-  const html = response.data;
-
-  const results = parseSubtitleSearch(html);
-
+ 
+async function searchSubtitles(query) {
+  const url =
+    "https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-" +
+    encodeURIComponent(query);
+ 
+  const res = await client.get(url);
+ 
+  if (res.status !== 200) {
+    throw {
+      type: "search_failed",
+      debug: serializeError(res, url),
+    };
+  }
+ 
+  const results = parseSearch(res.data);
   results.sort((a, b) => b.downloads - a.downloads);
-
+ 
   return {
-    query: q,
-    language: "all",
+    query,
     total: results.length,
     results,
   };
 }
-
-function filterByLanguage(searchData, lang) {
-  if (!lang) return searchData;
-
-  const filtered = searchData.results.filter(
-    (item) => item.language.toLowerCase() === lang.toLowerCase()
-  );
-
-  return {
-    query: searchData.query,
-    language: lang,
-    total: filtered.length,
-    results: filtered,
-  };
-}
-
-async function downloadSubtitleFile(id) {
+ 
+async function downloadSubtitle(id) {
   const urls = [
     `https://dl.opensubtitles.org/en/download/sub/${id}`,
     `https://www.opensubtitles.org/en/subtitleserve/sub/${id}`,
   ];
-
-  for (const url of urls) {
-    try {
-      const response = await axios({
-        method: "get",
-        url,
-        responseType: "arraybuffer",
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-          Accept: "*/*",
-          Referer: "https://www.opensubtitles.org/",
-        },
-        maxRedirects: 5,
-        timeout: 15000,
-      });
-
-      const buffer = Buffer.from(response.data);
-      const sample = buffer.slice(0, 200).toString();
-
-      if (sample.includes("<!DOCTYPE") || sample.includes("<html")) {
-        continue;
-      }
-
-      let ext = "srt";
-      const contentDisposition = response.headers["content-disposition"];
-
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="?([^";]+)"?/);
-        if (match) {
-          const fname = match[1];
-          const parts = fname.split(".");
-          if (parts.length > 1) ext = parts.pop();
-        }
-      }
-
-      return { buffer, ext };
-    } catch (err) {
-      console.log(`Failed URL ${url}`);
+ 
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    const res = await client.get(url, { responseType: "arraybuffer" });
+ 
+    if (res.status !== 200) continue;
+ 
+    const buf = Buffer.from(res.data);
+    const head = buf.slice(0, 200).toString();
+ 
+    if (head.includes("<html")) continue;
+ 
+    let ext = "srt";
+    const cd = res.headers["content-disposition"];
+    if (cd) {
+      const m = cd.match(/filename="?([^";]+)"?/);
+      if (m) ext = m[1].split(".").pop();
     }
+ 
+    return { buffer: buf, ext };
   }
-
-  throw new Error("All download URLs failed");
+ 
+  throw { type: "download_failed", message: "All sources failed" };
 }
-
-// ------------------------------------------------------------
-// Express routes
-// ------------------------------------------------------------
-
-// Home
-app.get('/', (req, res) => {
-  res.send(`
-    <h1>OpenSubtitles Proxy</h1>
-    <p>Use <code>/search?q=</code> to search subtitles.</p>
-    <p>Use <code>/download/:id</code> to download a subtitle file.</p>
-  `);
+ 
+app.get("/", (req, res) => {
+  res.send("OpenSubtitles proxy running");
 });
-
-// Search endpoint
-app.get('/search', async (req, res) => {
-  const query = req.query.q;
-  const lang = req.query.lang; // optional language filter, e.g. ?q=inception&lang=en
-
-  if (!query) {
-    return res.status(400).json({ error: 'Missing query parameter "q"' });
-  }
-
+ 
+app.get("/subtitle", async (req, res) => {
+  const action = req.query.action;
+ 
   try {
-    const searchResult = await searchSubtitles(query);
-    const finalResult = lang ? filterByLanguage(searchResult, lang) : searchResult;
-    res.json(finalResult);
-  } catch (error) {
-    console.error('Search error:', error.message);
-    res.status(500).json({ error: 'Failed to fetch subtitles' });
+    if (action === "search") {
+      const q = req.query.q;
+      if (!q) return res.status(400).json({ error: "Missing q" });
+ 
+      const data = await searchSubtitles(q);
+      return res.json({ success: true, data });
+    }
+ 
+    if (action === "download") {
+      const id = req.query.id;
+      if (!id) return res.status(400).json({ error: "Missing id" });
+ 
+      const file = await downloadSubtitle(id);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="subtitle_${id}.${file.ext}"`
+      );
+      res.setHeader("Content-Type", "application/octet-stream");
+      return res.send(file.buffer);
+    }
+ 
+    res.status(400).json({
+      error: "Invalid action",
+      usage: [
+        "/subtitle?action=search&q=inception",
+        "/subtitle?action=download&id=195979",
+      ],
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err.type || "internal_error",
+      debug: err.debug || err,
+    });
   }
 });
-
-// Download endpoint
-app.get('/download/:id', async (req, res) => {
-  const id = req.params.id;
-
-  try {
-    const { buffer, ext } = await downloadSubtitleFile(id);
-    const filename = `subtitle_${id}.${ext}`;
-
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.send(buffer);
-  } catch (error) {
-    console.error('Download error:', error.message);
-    res.status(500).json({ error: 'Failed to download subtitle file' });
-  }
-});
-
-// Start server
+ 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log("Server running on port", PORT);
 });
