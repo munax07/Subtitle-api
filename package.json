@@ -1,14 +1,15 @@
 {
-  "name": "opensubtitles-proxy-peak",
-  "version": "3.0.0",
-  "description": "🏆 The Ultimate OpenSubtitles Proxy API - Premium Features, Zero Cost",
+  "name": "opensubtitles-proxy",
+  "version": "2.0.0",
+  "description": "High-performance OpenSubtitles proxy API with anti-blocking measures",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node --expose-gc server.js",
+    "dev": "nodemon server.js",
+    "debug": "node --inspect --expose-gc server.js"
   },
   "dependencies": {
-    "axios": "^1.6.2",
+    "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
     "express": "^4.18.2",
@@ -16,24 +17,12 @@
     "node-cache": "^5.1.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.x"
   },
-  "keywords": [
-    "opensubtitles",
-    "subtitles",
-    "api",
-    "proxy",
-    "express",
-    "cors",
-    "rate-limit",
-    "cache",
-    "munax",
-    "premium",
-    "free"
-  ],
-  "author": "Munax",
+  "keywords": ["opensubtitles", "proxy", "api", "subtitles"],
+  "author": "Munax & Jerry",
   "license": "MIT"
 }
