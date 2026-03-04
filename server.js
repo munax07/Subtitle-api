@@ -9,8 +9,21 @@ const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+
+// ==================== PLATFORM DETECTION ====================
+const IS_KOYEB = process.env.KOYEB === "true" || process.env.KOYEB_SERVICE_DOMAIN ? true : false;
+const IS_RENDER = !!process.env.RENDER_EXTERNAL_URL;
+const BASE_URL = IS_KOYEB
+  ? `https://${process.env.KOYEB_SERVICE_DOMAIN}`
+  : (process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`);
 const NODE_ENV = process.env.NODE_ENV || "development";
+
+// Trust proxy settings (different for Koyeb / Render)
+if (IS_KOYEB) {
+  app.set("trust proxy", 2); // Koyeb uses two proxies
+} else {
+  app.set("trust proxy", 1); // Render / standard
+}
 
 // ==================== CONFIGURATION ====================
 const CACHE_TTL_SEARCH = parseInt(process.env.CACHE_TTL_SEARCH) || 300;      // seconds
@@ -23,7 +36,8 @@ const MIN_DELAY_MS = 1000;
 const MAX_DELAY_MS = 3000;
 const SEARCH_RETRIES = 2;
 
-app.set("trust proxy", 1); // Trust Render’s proxy
+// Memory limit for Koyeb free tier (512 MB)
+const MEMORY_LIMIT = 512 * 1024 * 1024; // 512 MB
 
 // ==================== CACHES ====================
 const searchCache = new NodeCache({ stdTTL: CACHE_TTL_SEARCH, checkperiod: 60 });
@@ -347,14 +361,32 @@ function validateId(id) {
   return /^\d+$/.test(id.trim());
 }
 
-// ==================== SELF‑WAKE (Render only) ====================
-if (process.env.RENDER_EXTERNAL_URL) {
+// ==================== PLATFORM-SPECIFIC HANDLING ====================
+if (IS_KOYEB) {
+  console.log("🚀 Running on Koyeb - platform handles wake/sleep");
+  
+  // Memory monitoring for Koyeb free tier
+  setInterval(() => {
+    const mem = process.memoryUsage();
+    if (mem.heapUsed > MEMORY_LIMIT * 0.8) {
+      console.warn("⚠️ High memory usage on Koyeb, clearing caches");
+      searchCache.flushAll();
+      downloadMetaCache.flushAll();
+      if (global.gc) {
+        console.log("🧹 Running garbage collection");
+        global.gc();
+      }
+    }
+  }, 60000); // Check every minute
+} else if (IS_RENDER) {
   console.log("Self‑wake activated – pinging every 10 minutes");
   setInterval(() => {
     axios.get(`${BASE_URL}/health`, { timeout: 5000 })
       .then((res) => console.log(`Self-ping ${new Date().toISOString()} – status: ${res.status}`))
       .catch((err) => console.log(`Self-ping failed: ${err.message}`));
   }, 10 * 60 * 1000);
+} else {
+  console.log("Running in local/development mode");
 }
 
 // ==================== ROUTES ====================
@@ -368,7 +400,7 @@ app.get("/", (req, res) => {
   }
   res.json({
     success: true,
-    name: "OpenSubtitles Proxy API – Peak Edition",
+    name: "OpenSubtitles Proxy API – Peak Edition v2",
     endpoints: [
       "GET /subtitle?action=search&q=<query>&lang=<lang>&page=<page>",
       "GET /subtitle?action=download&id=<id>&filename=<optional>",
@@ -466,9 +498,17 @@ app.get("/subtitle", limiter, async (req, res) => {
   }
 });
 
-// Health check
+// Health check (with Koyeb header)
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "healthy", uptime: process.uptime(), timestamp: new Date().toISOString() });
+  if (IS_KOYEB) {
+    res.setHeader("X-Koyeb-Health", "ok");
+  }
+  res.status(200).json({ 
+    status: "healthy", 
+    uptime: process.uptime(), 
+    timestamp: new Date().toISOString(),
+    platform: IS_KOYEB ? "koyeb" : (IS_RENDER ? "render" : "other")
+  });
 });
 
 // Favicon (prevents 404 errors)
@@ -490,16 +530,19 @@ app.listen(PORT, () => {
   console.log(`
 +==============================================+
 |   OPENSUBTITLES PROXY API - PEAK EDITION    |
+|                 VERSION 2.0                  |
 +==============================================+
 |  Anti‑block    : UA rotation + delays + retry |
-|  Self‑wake     : ${process.env.RENDER_EXTERNAL_URL ? "ACTIVE" : "OFF (local)"}           |
+|  Platform      : ${IS_KOYEB ? "KOYEB" : (IS_RENDER ? "RENDER" : "LOCAL")} ${IS_KOYEB ? "🚀" : ""}       |
+|  Self‑wake     : ${IS_RENDER ? "ACTIVE" : (IS_KOYEB ? "HANDLED BY KOYEB" : "OFF")}  |
 |  Cache search  : ${CACHE_TTL_SEARCH}s                    |
 |  Cache dl‑meta : ${CACHE_TTL_DOWNLOAD_META}s                    |
 |  Rate limit    : ${RATE_LIMIT_MAX}/15min                    |
 |  CORS          : Enabled                       |
 |  RAM‑safe      : buffers NOT cached             |
 |  Environment   : ${NODE_ENV}                         |
-|  Made with love by Munax & optimised by Jerry  |
+|  GC enabled    : ${typeof global.gc === 'function' ? 'YES' : 'NO (use --expose-gc)'} |
+|  Made with ❤️ by Munax & Jerry                  |
 +==============================================+
   `);
 });
