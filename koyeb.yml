@@ -1,31 +1,42 @@
-name: opensubtitles-proxy
-service:
-  name: opensubtitles-proxy
-  instance_type: nano
-  routes:
-    - port: 3000
-      path: /
-      protocol: http
-  env:
-    - name: NODE_ENV
-      value: production
-    - name: KOYEB
-      value: "true"
-    - name: CACHE_TTL_SEARCH
-      value: "300"
-    - name: CACHE_TTL_DOWNLOAD_META
-      value: "600"
-    - name: RATE_LIMIT_MAX
-      value: "100"
-  git:
-    repository: yourusername/opensubtitles-proxy
-    branch: main
-  build:
-    command: npm install
-  run:
-    command: node --expose-gc server.js
-  scaling:
-    min: 1
-    max: 1
-  regions:
-    - was   # US West (or fra for Europe, sin for Asia)
+name: void-cinema-subtitle-api
+
+services:
+  - name: api
+    type: web
+    git:
+      repository: github.com/munax07/Subtitle-api
+      branch: main
+    build:
+      buildpack:
+        build_command: npm install
+        run_command: npm start
+    env:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8000"
+      - key: CACHE_TTL_SEARCH
+        value: "300"
+      - key: CACHE_TTL_DL
+        value: "600"
+      - key: RATE_LIMIT_MAX
+        value: "100"
+      - key: MEMORY_LIMIT_MB
+        value: "512"
+    ports:
+      - port: 8000
+        protocol: http
+    healthchecks:
+      - path: /health
+        port: 8000
+        type: http
+        interval: 30
+        timeout: 10
+        unhealthy_threshold: 3
+        healthy_threshold: 1
+    scaling:
+      min: 1
+      max: 1
+    regions:
+      - was
+    instance_type: free
