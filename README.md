@@ -1,42 +1,24 @@
-# 🎬 OpenSubtitles Proxy API – by Munax
+FROM node:20-alpine AS base
+WORKDIR /app
+ENV NODE_ENV=production
 
-<div align="center">
-  <img src="https://img.shields.io/badge/status-PEAK-brightgreen?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/version-3.0.0-blue?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/license-MIT-purple?style=for-the-badge" />
-</div>
+FROM base AS deps
+COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
 
-<div align="center">
-  <h3>🏆 The Ultimate OpenSubtitles Proxy – Premium Features, Absolutely Free</h3>
-  <p>Built with ❤️ by <strong>Munax</strong></p>
-</div>
+FROM base AS final
+WORKDIR /app
 
----
+RUN addgroup -g 1001 -S nodejs && adduser -S nodeapp -u 1001
+USER nodeapp
 
-## ✨ **Features That Beat Paid APIs**
+COPY --from=deps --chown=nodeapp:nodejs /app/node_modules ./node_modules
+COPY --chown=nodeapp:nodejs server.js .
+COPY --chown=nodeapp:nodejs package.json .
 
-| Feature | Your API | Others |
-|--------|----------|--------|
-| 💰 **Price** | FREE | $29-$99/month |
-| 🚀 **Rate Limit** | 100/15min | 1000/day |
-| 📦 **Cache** | 5-10 min TTL | None/Basic |
-| 🎨 **Metadata** | HD, HI, Trusted, Filename | Just title |
-| 🌐 **CORS** | Full Support | Often blocked |
-| 📊 **Monitoring** | Stats endpoint | None |
-| 🎯 **Languages** | ALL (en, ml, fr, etc.) | Limited |
+EXPOSE 3000
 
----
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
 
-## 🚀 **Quick Deploy**
-
-### **One-Click Deploy to Render**
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/yourusername/opensubtitles-proxy)
-
-### **Manual Deploy**
-
-```bash
-git clone https://github.com/yourusername/opensubtitles-proxy.git
-cd opensubtitles-proxy
-npm install
-npm start
+CMD ["node", "--expose-gc", "server.js"]
