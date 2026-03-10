@@ -1,28 +1,33 @@
 {
-  "name": "opensubtitles-proxy",
-  "version": "2.0.0",
-  "description": "High-performance OpenSubtitles proxy API with anti-blocking measures",
+  "name": "void-cinema-subtitle-api",
+  "version": "4.0.0",
+  "description": "Ultra Peak OpenSubtitles Proxy API — by Munax & Jerry",
   "main": "server.js",
   "scripts": {
     "start": "node --expose-gc server.js",
-    "dev": "nodemon server.js",
-    "debug": "node --inspect --expose-gc server.js"
-  },
-  "dependencies": {
-    "axios": "^1.6.0",
-    "cheerio": "^1.0.0-rc.12",
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "express-rate-limit": "^7.1.5",
-    "node-cache": "^5.1.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.1"
+    "dev": "node --expose-gc server.js",
+    "start:render": "NODE_ENV=production node --expose-gc server.js",
+    "start:koyeb": "NODE_ENV=production node --expose-gc server.js",
+    "start:vercel": "NODE_ENV=production node server.js"
   },
   "engines": {
-    "node": ">=18.x"
+    "node": ">=18.0.0"
   },
-  "keywords": ["opensubtitles", "proxy", "api", "subtitles"],
-  "author": "Munax & Jerry",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.1",
+    "node-cache": "^5.1.2"
+  },
+  "keywords": [
+    "subtitles",
+    "opensubtitles",
+    "proxy",
+    "api",
+    "void-cinema"
+  ],
+  "author": "Munax <munax07> & Jerry",
   "license": "MIT"
 }
