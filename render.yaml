@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: void-cinema-subtitle-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RENDER
+        value: "true"
+      - key: CACHE_TTL_SEARCH
+        value: "300"
+      - key: CACHE_TTL_DL
+        value: "600"
+      - key: RATE_LIMIT_MAX
+        value: "100"
+      - key: MEMORY_LIMIT_MB
+        value: "512"
+    autoDeploy: true
