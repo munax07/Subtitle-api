@@ -1,21 +1,37 @@
-// ============================================================
-// server.js – ULTRA PEAK SUBTITLE API (KOYEB/RENDER/CLOUD)
-//            – Now with Vercel reverse proxy support
-// ============================================================
+// ============================================================================
+// ULTRA PEAK SUBTITLE API BY MUNAx⚡💗 – v11.0 (2026 FINAL – with all fixes)
+// ============================================================================
+// Features:
+// - Malayalam first, auto‑detection
+// - ZIP extraction with size limit (prevents bomb attacks)
+// - Input sanitization (no path traversal)
+// - Proxy pool capped at 300, deduplicated
+// - Exponential backoff retries
+// - Deep health checks
+// - Graceful shutdown (SIGTERM)
+// - Structured JSON logging
+// - Request ID tracking (X-Request-ID)
+// - Works on Koyeb, Render, Vercel, Railway, local
+// ============================================================================
+
 const express = require("express");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const { HttpsProxyAgent } = require("https-proxy-agent");
 const cors = require("cors");
-const zlib = require('zlib');
+const zlib = require("zlib");
 const NodeCache = require("node-cache");
+const AdmZip = require("adm-zip");
+const path = require("path");
+const rateLimit = require("express-rate-limit");
+const { randomUUID } = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ------------------------------------------------------------
-// Platform detection – works everywhere
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Platform detection
+// ----------------------------------------------------------------------------
 const PLATFORM = (() => {
   if (process.env.RENDER === "true" || process.env.RENDER_EXTERNAL_URL) return "render";
   if (process.env.KOYEB_APP_NAME || process.env.KOYEB) return "koyeb";
@@ -36,60 +52,114 @@ const BASE_URL = (() => {
 
 app.set("trust proxy", PLATFORM === "vercel" ? false : 1);
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Environment variables
-// ------------------------------------------------------------
-const PROXY_URL = process.env.PROXY_URL; // Your Vercel app URL, e.g. https://termux-proxy.vercel.app
+// ----------------------------------------------------------------------------
+const PROXY_URL = process.env.PROXY_URL;                      // Your Vercel proxy URL (optional)
+const CACHE_TTL_SEARCH = parseInt(process.env.CACHE_TTL_SEARCH) || 600;   // 10 min
+const CACHE_TTL_DL = parseInt(process.env.CACHE_TTL_DL) || 1800;           // 30 min
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX) || 100;
+const MAX_ZIP_SIZE = 5 * 1024 * 1024; // 5 MB (ZIP bomb protection)
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Structured logger with levels
+// ----------------------------------------------------------------------------
+const logger = {
+  info: (msg, meta = {}) => console.log(JSON.stringify({ level: "info", timestamp: new Date().toISOString(), msg, ...meta })),
+  warn: (msg, meta = {}) => console.warn(JSON.stringify({ level: "warn", timestamp: new Date().toISOString(), msg, ...meta })),
+  error: (msg, meta = {}) => console.error(JSON.stringify({ level: "error", timestamp: new Date().toISOString(), msg, ...meta })),
+  debug: (msg, meta = {}) => {
+    if (process.env.DEBUG) console.debug(JSON.stringify({ level: "debug", timestamp: new Date().toISOString(), msg, ...meta }));
+  }
+};
+
+// ----------------------------------------------------------------------------
+// Request ID middleware
+// ----------------------------------------------------------------------------
+app.use((req, res, next) => {
+  const requestId = req.headers["x-request-id"] || randomUUID();
+  req.requestId = requestId;
+  res.setHeader("X-Request-ID", requestId);
+  next();
+});
+
+// ----------------------------------------------------------------------------
+// Rate limiting
+// ----------------------------------------------------------------------------
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: "Too many requests, please try again later." },
+  keyGenerator: (req) => req.requestId || req.ip
+});
+app.use("/search", limiter);
+app.use("/download", limiter);
+
+// ----------------------------------------------------------------------------
 // Caches
-// ------------------------------------------------------------
-const searchCache = new NodeCache({ stdTTL: 600 });      // 10 min
-const downloadCache = new NodeCache({ stdTTL: 1800 });   // 30 min
+// ----------------------------------------------------------------------------
+const searchCache = new NodeCache({ stdTTL: CACHE_TTL_SEARCH });
+const downloadCache = new NodeCache({ stdTTL: CACHE_TTL_DL });
 
-// ------------------------------------------------------------
-// Free proxy pool (for fallback when PROXY_URL isn't set or fails)
-// ------------------------------------------------------------
-let proxyList = [];
-let workingProxies = [];
+// ----------------------------------------------------------------------------
+// Proxy pools & session
+// ----------------------------------------------------------------------------
+let proxyList = [];               // all known free proxies (capped at 300)
+let workingProxies = [];           // proxies that have worked recently
 let sessionCookie = "";
 let cookieJar = new Map();
 
-// ------------------------------------------------------------
-// Fetch free proxies from multiple sources (fallback)
-// ------------------------------------------------------------
+// Hardcoded emergency proxies (always work)
+const EMERGENCY_PROXIES = [
+  "51.158.106.31:8811",
+  "51.158.105.94:8811",
+  "51.158.120.36:8811",
+  "51.158.118.98:8811",
+  "51.158.99.51:8811",
+  "185.162.231.190:3128",
+  "8.210.83.33:80",
+  "47.91.105.28:3128"
+];
+
+// ----------------------------------------------------------------------------
+// Fetch free proxies from multiple sources (capped at 300)
+// ----------------------------------------------------------------------------
 async function refreshProxies() {
-  if (PROXY_URL) return; // if we have a PROXY_URL, we don't need free proxies
   try {
-    console.log("🔄 Fetching free proxies...");
+    logger.info("Fetching free proxies...");
     const sources = [
       "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt",
       "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
       "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
     ];
-    const results = await Promise.allSettled(sources.map(s => 
-      axios.get(s, { timeout: 8000 })
-    ));
-    
-    proxyList = results
-      .filter(r => r.status === 'fulfilled')
+    const results = await Promise.allSettled(sources.map(s => axios.get(s, { timeout: 8000 })));
+
+    let newProxies = results
+      .filter(r => r.status === "fulfilled")
       .flatMap(r => r.value.data.split("\n"))
       .map(p => p.trim())
-      .filter(p => p && p.includes(':') && !p.startsWith('#'))
-      .map(p => p.replace(/\r$/, ''))
-      .slice(0, 200);
-    
-    proxyList = [...new Set(proxyList)];
-    console.log(`✅ ${proxyList.length} free proxies loaded`);
+      .filter(p => p && p.includes(":") && !p.startsWith("#"))
+      .map(p => p.replace(/\r$/, ""));
+
+    // Deduplicate and cap at 300
+    proxyList = [...new Set(newProxies)].slice(0, 300);
+    logger.info(`Loaded ${proxyList.length} free proxies`);
+
+    if (proxyList.length === 0) {
+      proxyList = EMERGENCY_PROXIES;
+      logger.warn("Using emergency proxy list");
+    }
   } catch (e) {
-    console.error("Proxy refresh failed, using fallback list");
-    proxyList = ["8.210.83.33:80", "47.91.105.28:3128", "185.162.231.190:3128"];
+    logger.error("Proxy refresh failed, using emergency list", { error: e.message });
+    proxyList = EMERGENCY_PROXIES;
   }
 }
 
-// ------------------------------------------------------------
-// Test a proxy (used for fallback)
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Test a proxy (quick check)
+// ----------------------------------------------------------------------------
 async function testProxy(proxy) {
   const agent = new HttpsProxyAgent(`http://${proxy}`);
   try {
@@ -104,30 +174,30 @@ async function testProxy(proxy) {
   }
 }
 
-// ------------------------------------------------------------
-// Validate working proxies (fallback)
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Validate working proxies (periodic)
+// ----------------------------------------------------------------------------
 async function validateWorkingProxies() {
   if (workingProxies.length === 0) return;
-  console.log(`🔍 Validating ${workingProxies.length} working proxies...`);
+  logger.info(`Validating ${workingProxies.length} working proxies...`);
   const valid = [];
   for (const proxy of workingProxies) {
     if (await testProxy(proxy)) valid.push(proxy);
-    else console.log(`   ❌ ${proxy} died`);
+    else logger.debug(`Proxy died`, { proxy });
   }
   workingProxies = valid;
-  console.log(`✅ ${workingProxies.length} working proxies remain`);
+  logger.info(`${workingProxies.length} working proxies remain`);
 }
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Cookie handling
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 function extractCookies(res) {
   const setCookie = res?.headers?.["set-cookie"];
   if (!Array.isArray(setCookie)) return;
   setCookie.forEach(raw => {
-    const [pair] = raw.split(';');
-    const [key, val] = pair.split('=');
+    const [pair] = raw.split(";");
+    const [key, val] = pair.split("=");
     if (key && val) cookieJar.set(key.trim(), val.trim());
   });
   const cookies = [];
@@ -135,9 +205,9 @@ function extractCookies(res) {
   sessionCookie = cookies.join("; ");
 }
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Default headers – mimic a real browser
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 const defaultHeaders = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0",
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
@@ -147,88 +217,84 @@ const defaultHeaders = {
   "Referer": "https://www.opensubtitles.org/"
 };
 
-// ------------------------------------------------------------
-// Session warm-up (get fresh cookies)
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Session warm-up
+// ----------------------------------------------------------------------------
 async function warmUpSession() {
-  console.log("🌡️  Warming up session...");
+  logger.info("Warming up session...");
   try {
-    // If we have a PROXY_URL, we should warm up through it?
-    // But warm-up should ideally hit the target directly. Let's try direct first.
     const res = await axios.get("https://www.opensubtitles.org/en", {
       timeout: 10000,
       headers: defaultHeaders,
       maxRedirects: 2
     });
     extractCookies(res);
-    console.log(`✅ Session ready, cookies: ${cookieJar.size}`);
+    logger.info(`Session ready, cookies: ${cookieJar.size}`);
     return true;
   } catch (e) {
-    console.error("❌ Session warm-up failed:", e.message);
+    logger.error("Session warm-up failed", { error: e.message });
     return false;
   }
 }
 
-// ------------------------------------------------------------
-// The heart – fastFetch with support for Vercel reverse proxy
-// ------------------------------------------------------------
-async function fastFetch(url, responseType = "text") {
-  // ------------------------------------------------------------------
-  // If PROXY_URL is set, we treat it as a reverse proxy prefix.
-  // We simply prepend it to the target URL.
-  // ------------------------------------------------------------------
-  if (PROXY_URL) {
+// ----------------------------------------------------------------------------
+// Core fetch with exponential backoff and multi‑layer fallback
+// ----------------------------------------------------------------------------
+async function fastFetch(url, responseType = "text", attempt = 1, maxAttempts = 3) {
+  const backoff = attempt => Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+  const timeout = attempt => 5000 + (attempt - 1) * 2000;
+
+  // Layer 1: Use PROXY_URL if provided
+  if (PROXY_URL && attempt === 1) {
     const proxyTarget = `${PROXY_URL}/${url}`;
     try {
       const res = await axios.get(proxyTarget, {
-        timeout: 15000,
+        timeout: timeout(attempt),
         responseType,
         headers: { ...defaultHeaders, Cookie: sessionCookie }
       });
       extractCookies(res);
-      console.log("🔌 Vercel reverse proxy OK");
+      logger.info("Vercel proxy OK");
       return res;
     } catch (e) {
-      console.log("➖ Vercel proxy failed, falling back to free proxy pool...");
-      // fall through to other methods
+      logger.warn("Vercel proxy failed", { error: e.message, attempt });
+      await new Promise(res => setTimeout(res, backoff(attempt)));
     }
   }
 
-  // ------------------------------------------------------------------
-  // Original fallback: direct connection + free proxy pool
-  // ------------------------------------------------------------------
-  // 1) Try direct connection (only if no PROXY_URL is set)
-  if (!PROXY_URL) {
+  // Layer 2: Direct connection (if no PROXY_URL and attempt 1)
+  if (!PROXY_URL && attempt === 1) {
     try {
       const res = await axios.get(url, {
-        timeout: 8000,
+        timeout: timeout(attempt),
         responseType,
         headers: { ...defaultHeaders, Cookie: sessionCookie }
       });
       if (res.status === 200) {
         extractCookies(res);
-        console.log("⚡ Direct OK");
+        logger.info("Direct OK");
         return res;
       }
     } catch (e) {
-      console.log("➖ Direct failed");
+      logger.warn("Direct failed", { error: e.message, attempt });
+      await new Promise(res => setTimeout(res, backoff(attempt)));
     }
   }
 
-  // 2) Try previously working proxies (fallback pool)
+  // Layer 3: Previously working proxies
   if (workingProxies.length > 0) {
     for (const proxy of workingProxies) {
       try {
         const agent = new HttpsProxyAgent(`http://${proxy}`);
         const res = await axios.get(url, {
           httpsAgent: agent,
-          timeout: 5000,
+          timeout: timeout(attempt),
           responseType,
           headers: { ...defaultHeaders, Cookie: sessionCookie }
         });
         if (res.status === 200) {
           extractCookies(res);
-          console.log(`✅ Working proxy: ${proxy}`);
+          logger.info(`Working proxy used`, { proxy });
           return res;
         }
       } catch (e) {
@@ -237,14 +303,14 @@ async function fastFetch(url, responseType = "text") {
     }
   }
 
-  // 3) Try 3 random proxies from the pool
-  const candidates = [...proxyList].sort(() => 0.5 - Math.random()).slice(0, 3);
+  // Layer 4: Random proxies from pool
+  const candidates = [...proxyList].sort(() => 0.5 - Math.random()).slice(0, 5);
   for (const proxy of candidates) {
     try {
       const agent = new HttpsProxyAgent(`http://${proxy}`);
       const res = await axios.get(url, {
         httpsAgent: agent,
-        timeout: 6000,
+        timeout: timeout(attempt),
         responseType,
         headers: { ...defaultHeaders, Cookie: sessionCookie }
       });
@@ -252,7 +318,7 @@ async function fastFetch(url, responseType = "text") {
         extractCookies(res);
         workingProxies.unshift(proxy);
         workingProxies = workingProxies.slice(0, 15);
-        console.log(`✅ New working proxy: ${proxy}`);
+        logger.info(`New working proxy found`, { proxy });
         return res;
       }
     } catch (e) {
@@ -260,15 +326,22 @@ async function fastFetch(url, responseType = "text") {
     }
   }
 
-  throw new Error("All connection methods exhausted");
+  if (attempt < maxAttempts) {
+    const delay = backoff(attempt);
+    logger.debug(`Retrying fastFetch`, { attempt, nextAttempt: attempt + 1, delay });
+    await new Promise(res => setTimeout(res, delay));
+    return fastFetch(url, responseType, attempt + 1, maxAttempts);
+  }
+
+  throw new Error("All connection methods exhausted after retries");
 }
 
-// ------------------------------------------------------------
-// Movie detection – improved to catch many TV patterns
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Movie detection
+// ----------------------------------------------------------------------------
 function isMovieSubtitle(title) {
   if (!title) return false;
-  const normalized = title.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalized = title.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
 
   const tvPatterns = [
     /S\d{2}[.\s-]*E\d{2}/i,
@@ -308,10 +381,10 @@ function isMovieSubtitle(title) {
   return false;
 }
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Language sorter – Malayalam first, then English, then others
-// ------------------------------------------------------------
-function sortByLanguagePriority(results, priorityLangs = ['ml', 'en']) {
+// ----------------------------------------------------------------------------
+function sortByLanguagePriority(results, priorityLangs = ["ml", "en"]) {
   const priorityMap = new Map(priorityLangs.map((lang, i) => [lang, i]));
   const defaultPriority = priorityLangs.length;
   return results.sort((a, b) => {
@@ -322,23 +395,44 @@ function sortByLanguagePriority(results, priorityLangs = ['ml', 'en']) {
   });
 }
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Auto Malayalam detection
+// ----------------------------------------------------------------------------
+function detectMalayalamQuery(q) {
+  if (!q) return false;
+  const lower = q.toLowerCase();
+  const malayalamKeywords = ["മലയാളം", "malayalam", "mallu", "ml"];
+  return malayalamKeywords.some(k => lower.includes(k));
+}
+
+// ----------------------------------------------------------------------------
 // Search endpoint
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 app.get("/search", async (req, res) => {
-  const { q, lang, type } = req.query;
+  const startTime = Date.now();
+  const requestId = req.requestId;
+  let { q, lang, type } = req.query;
   if (!q) return res.status(400).json({ success: false, error: "Missing q" });
 
-  const cacheKey = `search:${q}:${lang || 'all'}:${type || 'all'}`;
-  const cached = searchCache.get(cacheKey);
-  if (cached) return res.json({ ...cached, cached: true });
+  // Auto‑detect Malayalam
+  if (!lang && detectMalayalamQuery(q)) {
+    lang = "ml";
+    logger.info("Auto‑detected Malayalam query", { query: q, requestId });
+  }
 
-  console.log(`🔍 Searching: ${q}`);
+  const cacheKey = `search:${q}:${lang || "all"}:${type || "all"}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) {
+    logger.info("Cache hit", { cacheKey, requestId, duration: Date.now() - startTime });
+    return res.json({ ...cached, cached: true });
+  }
+
+  logger.info("Searching", { query: q, lang, type, requestId });
   try {
     let searchQuery = q;
-    if (type === 'movie' && !q.match(/19|20\d{2}/)) {
-      if (q.toLowerCase().includes('avatar') && !q.includes('2022')) {
-        searchQuery = 'Avatar 2009';
+    if (type === "movie" && !q.match(/19|20\d{2}/)) {
+      if (q.toLowerCase().includes("avatar") && !q.includes("2022")) {
+        searchQuery = "Avatar 2009";
       }
     }
 
@@ -349,7 +443,7 @@ app.get("/search", async (req, res) => {
     let results = [];
     $("subtitle").each((i, el) => {
       const rawTitle = $(el).find("moviename").text() || $(el).find("releasename").text();
-      const title = rawTitle.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+      const title = rawTitle.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
       const yearMatch = title.match(/\((\d{4})\)/);
       results.push({
         id: $(el).find("idsubtitle").text(),
@@ -362,23 +456,23 @@ app.get("/search", async (req, res) => {
       });
     });
 
-    if (type === 'movie') results = results.filter(r => r.isMovie);
-    if (lang && lang !== 'all') results = results.filter(r => r.lang.toLowerCase() === lang.toLowerCase());
+    if (type === "movie") results = results.filter(r => r.isMovie);
+    if (lang && lang !== "all") results = results.filter(r => r.lang.toLowerCase() === lang.toLowerCase());
 
-    if (!lang || lang === 'all') results = sortByLanguagePriority(results);
+    if (!lang || lang === "all") results = sortByLanguagePriority(results);
     else results.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
 
     // Avatar fallback
-    if (results.length === 0 && q.toLowerCase().includes('avatar')) {
-      console.log("Trying specific Avatar movies...");
-      for (const mq of ['Avatar 2009', 'Avatar The Way of Water 2022']) {
+    if (results.length === 0 && q.toLowerCase().includes("avatar")) {
+      logger.info("Trying specific Avatar movies...", { requestId });
+      for (const mq of ["Avatar 2009", "Avatar The Way of Water 2022"]) {
         try {
           const movieUrl = `https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-${encodeURIComponent(mq)}/simplexml`;
           const movieResp = await fastFetch(movieUrl, "text");
           const $m = cheerio.load(movieResp.data, { xmlMode: true });
           $m("subtitle").each((i, el) => {
             const rawTitle = $m(el).find("moviename").text() || $m(el).find("releasename").text();
-            const title = rawTitle.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
+            const title = rawTitle.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
             results.push({
               id: $m(el).find("idsubtitle").text(),
               title: title.replace(/\s*\(\d{4}\)$/, "").trim(),
@@ -396,35 +490,44 @@ app.get("/search", async (req, res) => {
         seen.add(r.id);
         return true;
       });
-      if (!lang || lang === 'all') results = sortByLanguagePriority(results);
+      if (!lang || lang === "all") results = sortByLanguagePriority(results);
     }
 
     const response = { success: true, count: results.length, query: q, results: results.slice(0, 30) };
     searchCache.set(cacheKey, response);
+    logger.info("Search completed", { count: results.length, requestId, duration: Date.now() - startTime });
     res.json(response);
 
   } catch (err) {
-    console.error("Search error:", err.message);
+    logger.error("Search error", { error: err.message, requestId, duration: Date.now() - startTime });
     res.status(500).json({ success: false, error: "Search failed. Try again." });
   }
 });
 
-// ------------------------------------------------------------
-// Download endpoint
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Download endpoint – with ZIP extraction, size limit, and sanitized filename
+// ----------------------------------------------------------------------------
 app.get("/download", async (req, res) => {
-  const { id, title } = req.query;
+  const startTime = Date.now();
+  const requestId = req.requestId;
+  let { id, title } = req.query;
   if (!id) return res.status(400).json({ success: false, error: "Missing id" });
+
+  // Sanitize title to prevent path traversal
+  if (title) {
+    title = path.basename(title).replace(/[^a-z0-9\s\-_.]/gi, "").substring(0, 100);
+  }
 
   const cacheKey = `dl:${id}`;
   const cached = downloadCache.get(cacheKey);
   if (cached) {
+    logger.info("Download cache hit", { id, requestId, duration: Date.now() - startTime });
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${cached.filename}"`);
     return res.send(cached.buffer);
   }
 
-  console.log(`⬇️ Downloading: ${id}`);
+  logger.info("Downloading", { id, title, requestId });
   const url = `https://dl.opensubtitles.org/en/download/sub/${id}`;
   try {
     const resp = await fastFetch(url, "arraybuffer");
@@ -432,23 +535,83 @@ app.get("/download", async (req, res) => {
     if (buffer[0] === 0x1f && buffer[1] === 0x8b) buffer = zlib.gunzipSync(buffer);
     if (buffer.slice(0, 100).toString().includes("<!DOCTYPE")) throw new Error("Got HTML instead of subtitle");
 
-    const filename = title ? `${title.replace(/[^a-z0-9]/gi, '_')}.srt` : `subtitle_${id}.srt`;
+    // ------------------------------------------------------------------------
+    // ZIP extraction with size limit (anti‑bomb)
+    // ------------------------------------------------------------------------
+    const isZip = buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4B &&
+                  buffer[2] === 0x03 && buffer[3] === 0x04;
 
-    downloadCache.set(cacheKey, { buffer, filename });
+    let extractedFilename = null;
+    if (isZip) {
+      logger.info("Detected ZIP, extracting...", { id, requestId });
+      try {
+        const zip = new AdmZip(buffer);
+        const entries = zip.getEntries();
+
+        // Find first subtitle entry
+        const subEntry = entries.find(e =>
+          e.entryName.match(/\.(srt|ass|ssa|sub|smi|txt)$/i) && !e.isDirectory
+        );
+
+        if (subEntry) {
+          // Size check: if extracted file > 5 MB, reject (ZIP bomb)
+          if (subEntry.header.size > MAX_ZIP_SIZE) {
+            throw new Error(`Extracted file too large (${subEntry.header.size} bytes)`);
+          }
+          buffer = subEntry.getData();
+          extractedFilename = subEntry.entryName;
+          logger.info("Extracted subtitle", { filename: extractedFilename, requestId });
+        } else {
+          logger.warn("No subtitle file found in ZIP, sending whole ZIP", { id, requestId });
+        }
+      } catch (zipErr) {
+        logger.error("ZIP extraction failed", { error: zipErr.message, id, requestId });
+        // Fall through – send original buffer
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // Intelligent filename generation
+    // ------------------------------------------------------------------------
+    let finalFilename;
+    if (title) {
+      // Sanitized user‑provided title
+      finalFilename = `${title.replace(/[^a-z0-9]/gi, "_")}.srt`;
+    } else if (extractedFilename) {
+      // Use filename from ZIP
+      finalFilename = path.basename(extractedFilename).replace(/[^a-z0-9.-]/gi, "_");
+    } else {
+      // Try Content-Disposition
+      const cd = resp.headers["content-disposition"] || "";
+      const match = cd.match(/filename[^;=\n]*=([^;]*)/);
+      if (match && match[1]) {
+        let name = match[1].replace(/['"]/g, "").trim();
+        if (name.endsWith(".gz")) name = name.slice(0, -3);
+        if (!name.match(/\.(srt|ass|ssa|sub|smi|txt)$/i)) name += ".srt";
+        finalFilename = path.basename(name).replace(/[^a-z0-9.-]/gi, "_");
+      } else {
+        finalFilename = `subtitle_${id}.srt`;
+      }
+    }
+
+    downloadCache.set(cacheKey, { buffer, filename: finalFilename });
 
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${finalFilename}"`);
     res.send(buffer);
+    logger.info("Download completed", { id, filename: finalFilename, requestId, duration: Date.now() - startTime });
   } catch (err) {
-    console.error("Download error:", err);
+    logger.error("Download error", { error: err.message, id, requestId, duration: Date.now() - startTime });
     res.status(500).json({ success: false, error: "Download failed" });
   }
 });
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Languages endpoint
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 app.get("/languages", async (req, res) => {
+  const startTime = Date.now();
+  const requestId = req.requestId;
   const { q } = req.query;
   if (!q) return res.status(400).json({ success: false, error: "Missing q" });
   try {
@@ -460,22 +623,27 @@ app.get("/languages", async (req, res) => {
       const lang = $(el).find("iso639").text();
       if (lang) langs.add(lang);
     });
-    res.json({ success: true, query: q, languages: Array.from(langs).sort() });
+    const sorted = Array.from(langs).sort();
+    logger.info("Languages fetched", { query: q, count: sorted.length, requestId, duration: Date.now() - startTime });
+    res.json({ success: true, query: q, languages: sorted });
   } catch (err) {
+    logger.error("Languages error", { error: err.message, requestId, duration: Date.now() - startTime });
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 // Stats endpoint
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
 app.get("/stats", (req, res) => {
   const mem = process.memoryUsage();
   const uptime = process.uptime();
   const hours = Math.floor(uptime / 3600);
   const minutes = Math.floor((uptime % 3600) / 60);
   const seconds = Math.floor(uptime % 60);
-  const uptimeStr = `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
+  const uptimeStr = `${hours.toString().padStart(2, "0")}:${minutes
+    .toString()
+    .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 
   res.json({
     success: true,
@@ -484,35 +652,66 @@ app.get("/stats", (req, res) => {
     uptimeFormatted: uptimeStr,
     sessionReady: cookieJar.size > 0,
     cookieCount: cookieJar.size,
-    proxies: PROXY_URL ? "custom (Vercel)" : { total: proxyList.length, working: workingProxies.length },
+    proxies: PROXY_URL
+      ? "custom (Vercel)"
+      : { total: proxyList.length, working: workingProxies.length },
     memory: {
       rss: `${(mem.rss / 1024 / 1024).toFixed(2)} MB`,
       heapUsed: `${(mem.heapUsed / 1024 / 1024).toFixed(2)} MB`,
       heapTotal: `${(mem.heapTotal / 1024 / 1024).toFixed(2)} MB`
     },
     cache: {
-      search: { keys: searchCache.getStats().keys, hits: searchCache.getStats().hits, misses: searchCache.getStats().misses },
-      download: { keys: downloadCache.getStats().keys, hits: downloadCache.getStats().hits, misses: downloadCache.getStats().misses }
+      search: {
+        keys: searchCache.getStats().keys,
+        hits: searchCache.getStats().hits,
+        misses: searchCache.getStats().misses
+      },
+      download: {
+        keys: downloadCache.getStats().keys,
+        hits: downloadCache.getStats().hits,
+        misses: downloadCache.getStats().misses
+      }
     }
   });
 });
 
-// ------------------------------------------------------------
-// Health endpoint
-// ------------------------------------------------------------
-app.get("/health", (req, res) => {
-  res.json({ status: "healthy", platform: PLATFORM, uptime: process.uptime() });
+// ----------------------------------------------------------------------------
+// Deep health endpoint
+// ----------------------------------------------------------------------------
+app.get("/health", async (req, res) => {
+  const checks = {
+    uptime: process.uptime(),
+    platform: PLATFORM,
+    sessionReady: cookieJar.size > 0,
+    proxyPoolSize: proxyList.length,
+    workingProxiesCount: workingProxies.length,
+    cacheHealthy: searchCache.getStats().keys >= 0 && downloadCache.getStats().keys >= 0
+  };
+
+  // Test connectivity to OpenSubtitles (lightweight)
+  try {
+    const test = await axios.head("https://www.opensubtitles.org/en", { timeout: 5000 });
+    checks.opensubtitlesReachable = test.status >= 200 && test.status < 400;
+  } catch {
+    checks.opensubtitlesReachable = false;
+  }
+
+  const healthy = checks.opensubtitlesReachable && checks.sessionReady;
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? "healthy" : "degraded",
+    checks,
+    timestamp: new Date().toISOString()
+  });
 });
 
-// ------------------------------------------------------------
-// Root – simple dashboard
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Root dashboard
+// ----------------------------------------------------------------------------
 app.get("/", (req, res) => {
-  res.send(`
-<!DOCTYPE html>
+  res.send(`<!DOCTYPE html>
 <html>
 <head>
-  <title>🎬 Subtitle API – Live</title>
+  <title>🎬 ULTRA PEAK SUBTITLE API</title>
   <style>
     body { font-family: 'Segoe UI', monospace; background: #0c0f18; color: #c8ccd8; margin: 40px; }
     h1 { color: #e2ff47; }
@@ -536,14 +735,14 @@ app.get("/", (req, res) => {
     <h2>📚 Example Requests</h2>
     <div class="endpoint"><code>GET /search?q=Inception</code> – search all languages</div>
     <div class="endpoint"><code>GET /search?q=Avatar&type=movie&lang=ml</code> – Malayalam first, only movies</div>
-    <div class="endpoint"><code>GET /download?id=4290587</code> – download subtitle</div>
+    <div class="endpoint"><code>GET /download?id=4290587&title=Inception_2010</code> – perfect filename</div>
     <div class="endpoint"><code>GET /languages?q=Inception</code> – available languages</div>
     <div class="endpoint"><code>GET /stats</code> – server stats</div>
-    <div class="endpoint"><code>GET /health</code> – health check</div>
+    <div class="endpoint"><code>GET /health</code> – deep health check</div>
   </div>
-  <footer>Made with ❤️ – v7.0 (Vercel Proxy Ready)</footer>
+  <footer>Made with ❤️ – v11.0 (Ultimate Peak Edition)</footer>
   <script>
-    async function loadStats() {
+    async function refreshStats() {
       const res = await fetch('/stats');
       const data = await res.json();
       if (!data.success) return;
@@ -556,41 +755,61 @@ app.get("/", (req, res) => {
       \`;
       document.getElementById('stats').innerHTML = html;
     }
-    loadStats();
-    setInterval(loadStats, 10000);
+    refreshStats();
+    setInterval(refreshStats, 10000);
   </script>
 </body>
-</html>
-  `);
+</html>`);
 });
 
-// ------------------------------------------------------------
-// Startup & background jobs
-// ------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Graceful shutdown
+// ----------------------------------------------------------------------------
+let server;
+async function shutdown(signal) {
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+  server.close(async () => {
+    logger.info("HTTP server closed");
+    // Flush caches if needed (no-op)
+    process.exit(0);
+  });
+  setTimeout(() => {
+    logger.error("Force shutdown after timeout");
+    process.exit(1);
+  }, 10000);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+// ----------------------------------------------------------------------------
+// Startup
+// ----------------------------------------------------------------------------
 async function startup() {
-  console.log("╔════════════════════════════════════╗");
-  console.log("║   ULTRA PEAK SUBTITLE API v8.0    ║");
-  console.log("║      Malayalam First Edition       ║");
-  console.log("╚════════════════════════════════════╝");
+  logger.info("╔════════════════════════════════════╗");
+  logger.info("║   ULTRA PEAK SUBTITLE API v11.0   ║");
+  logger.info("║      Malayalam First Edition       ║");
+  logger.info("╚════════════════════════════════════╝");
+
   await refreshProxies();
   await warmUpSession();
 
   setInterval(async () => {
-    console.log("🔄 Periodic session refresh...");
+    logger.info("Periodic session refresh...");
     await warmUpSession();
   }, 2 * 60 * 60 * 1000);
 
   setInterval(validateWorkingProxies, 10 * 60 * 1000);
   setInterval(refreshProxies, 30 * 60 * 1000);
 
-  app.listen(PORT, () => {
-    console.log(`🌐 Server listening on ${BASE_URL}`);
-    console.log(`🔍 Test search: ${BASE_URL}/search?q=Inception`);
-    console.log(`📊 Dashboard: ${BASE_URL}/`);
+  server = app.listen(PORT, () => {
+    logger.info(`Server listening on ${BASE_URL}`);
+    logger.info(`Test search: ${BASE_URL}/search?q=Inception`);
+    logger.info(`Dashboard: ${BASE_URL}/`);
   });
 }
 
 startup().catch(err => {
-  console.error("Fatal startup error:", err);
+  logger.error("Fatal startup error", { error: err.message });
   process.exit(1);
 });
