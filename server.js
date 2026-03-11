@@ -1,667 +1,765 @@
-const express   = require(‘express’);
-const axios     = require(‘axios’);
-const cheerio   = require(‘cheerio’);
-const NodeCache = require(‘node-cache’);
-const rateLimit = require(‘express-rate-limit’);
-const cors      = require(‘cors’);
-const https     = require(‘https’);
-const path      = require(‘path’);
+const express = require("express");
+const axios = require("axios");
+const cheerio = require("cheerio");
+const NodeCache = require("node-cache");
+const rateLimit = require("express-rate-limit");
+const cors = require("cors");
+const compression = require("compression");
+const https = require("https");
+const path = require("path");
+const { HttpsProxyAgent } = require("https-proxy-agent");
+const pino = require("pino");
+const pinoHttp = require("pino-http");
 
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 3000;
 
+// --------------------------------------------------
+// PINO LOGGER SETUP
+// --------------------------------------------------
+const logger = pino({
+  level: process.env.LOG_LEVEL || "info",
+  formatters: {
+    level: (label) => ({ level: label }),
+  },
+  timestamp: pino.stdTimeFunctions.isoTime,
+});
+app.use(pinoHttp({ logger }));
+
+// --------------------------------------------------
 // PLATFORM DETECTION
+// --------------------------------------------------
 const PLATFORM = (function() {
-if (process.env.RENDER === ‘true’ || process.env.RENDER_EXTERNAL_URL) return ‘render’;
-if (process.env.KOYEB_APP_NAME    || process.env.KOYEB)               return ‘koyeb’;
-if (process.env.VERCEL            || process.env.VERCEL_URL)           return ‘vercel’;
-if (process.env.RAILWAY_STATIC_URL|| process.env.RAILWAY_ENVIRONMENT)  return ‘railway’;
-if (process.env.FLY_APP_NAME)                                          return ‘fly’;
-return ‘local’;
+  if (process.env.RENDER === "true" || process.env.RENDER_EXTERNAL_URL) return "render";
+  if (process.env.KOYEB_APP_NAME || process.env.KOYEB) return "koyeb";
+  if (process.env.VERCEL || process.env.VERCEL_URL) return "vercel";
+  if (process.env.RAILWAY_STATIC_URL || process.env.RAILWAY_ENVIRONMENT) return "railway";
+  if (process.env.FLY_APP_NAME) return "fly";
+  return "local";
 }());
 
 const BASE_URL = (function() {
-if (PLATFORM === ‘render’)  return process.env.RENDER_EXTERNAL_URL   || (‘http://localhost:’ + PORT);
-if (PLATFORM === ‘koyeb’)   return ‘https://’ + (process.env.KOYEB_PUBLIC_DOMAIN || ((process.env.KOYEB_APP_NAME || ‘app’) + ‘.koyeb.app’));
-if (PLATFORM === ‘vercel’)  return process.env.VERCEL_URL ? (‘https://’ + process.env.VERCEL_URL) : (‘http://localhost:’ + PORT);
-if (PLATFORM === ‘railway’) return process.env.RAILWAY_STATIC_URL    || (‘http://localhost:’ + PORT);
-if (PLATFORM === ‘fly’)     return ‘https://’ + process.env.FLY_APP_NAME + ‘.fly.dev’;
-return ‘http://localhost:’ + PORT;
+  if (PLATFORM === "render") return process.env.RENDER_EXTERNAL_URL || (`http://localhost:${PORT}`);
+  if (PLATFORM === "koyeb") return "https://" + (process.env.KOYEB_PUBLIC_DOMAIN || (process.env.KOYEB_APP_NAME || "app") + ".koyeb.app");
+  if (PLATFORM === "vercel") return process.env.VERCEL_URL ? ("https://" + process.env.VERCEL_URL) : (`http://localhost:${PORT}`);
+  if (PLATFORM === "railway") return process.env.RAILWAY_STATIC_URL || (`http://localhost:${PORT}`);
+  if (PLATFORM === "fly") return "https://" + process.env.FLY_APP_NAME + ".fly.dev";
+  return `http://localhost:${PORT}`;
 }());
 
-const IS_SERVERLESS = PLATFORM === ‘vercel’;
-const IS_PROD       = process.env.NODE_ENV === ‘production’;
-const NEEDS_PING    = (PLATFORM === ‘render’ || PLATFORM === ‘koyeb’ || PLATFORM === ‘railway’);
+const IS_SERVERLESS = PLATFORM === "vercel";
+const IS_PROD = process.env.NODE_ENV === "production";
+const NEEDS_PING = (PLATFORM === "render" || PLATFORM === "koyeb" || PLATFORM === "railway");
 
-app.set(‘trust proxy’, IS_SERVERLESS ? false : 1);
+app.set("trust proxy", IS_SERVERLESS ? false : 1);
 
+// --------------------------------------------------
+// COMPRESSION MIDDLEWARE
+// --------------------------------------------------
+app.use(compression({ threshold: 512 })); // compress responses larger than 512 bytes
+
+// --------------------------------------------------
+// PROXY SETUP
+// --------------------------------------------------
+let proxyAgent = null;
+if (process.env.PROXY_URL) {
+  try {
+    proxyAgent = new HttpsProxyAgent(process.env.PROXY_URL);
+    logger.info(`Proxy configured: ${process.env.PROXY_URL.split("@")[1] || process.env.PROXY_URL}`);
+  } catch (e) {
+    logger.warn("Invalid PROXY_URL, continuing without proxy");
+  }
+}
+
+// --------------------------------------------------
 // CONFIG
+// --------------------------------------------------
 const CFG = {
-CACHE_SEARCH_TTL   : parseInt(process.env.CACHE_TTL_SEARCH)    || 300,
-CACHE_DL_TTL       : parseInt(process.env.CACHE_TTL_DL)        || 600,
-RATE_WINDOW_MS     : 15 * 60 * 1000,
-RATE_MAX           : parseInt(process.env.RATE_LIMIT_MAX)       || 100,
-REQ_TIMEOUT        : parseInt(process.env.REQUEST_TIMEOUT_MS)   || 22000,
-MAX_REDIRECTS      : 5,
-SEARCH_RETRIES     : 4,
-DELAY_MIN          : 1100,
-DELAY_MAX          : 3600,
-DL_DELAY_MIN       : 700,
-DL_DELAY_MAX       : 2000,
-MEMORY_LIMIT       : (parseInt(process.env.MEMORY_LIMIT_MB) || 512) * 1024 * 1024,
-MEMORY_WARN        : 0.80,
-SELF_PING_MS       : 9 * 60 * 1000,
-SESSION_REFRESH_MS : 2 * 60 * 60 * 1000,
-WARMUP_RETRIES     : 4,
-WARMUP_DELAY       : 7000,
-MAX_QUERY_LEN      : 200,
-MAX_PAGE           : 100,
+  CACHE_SEARCH_TTL: parseInt(process.env.CACHE_TTL_SEARCH) || 300,
+  CACHE_DL_TTL: parseInt(process.env.CACHE_TTL_DL) || 600,
+  RATE_WINDOW_MS: 15 * 60 * 1000,
+  RATE_MAX: parseInt(process.env.RATE_LIMIT_MAX) || 100,
+  REQ_TIMEOUT: parseInt(process.env.REQUEST_TIMEOUT_MS) || 22000,
+  MAX_REDIRECTS: 5,
+  SEARCH_RETRIES: 4,
+  DELAY_MIN: 1100,
+  DELAY_MAX: 3600,
+  DL_DELAY_MIN: 700,
+  DL_DELAY_MAX: 2000,
+  MEMORY_LIMIT: (parseInt(process.env.MEMORY_LIMIT_MB) || 512) * 1024 * 1024,
+  MEMORY_WARN: 0.80,
+  SELF_PING_MS: 9 * 60 * 1000,
+  SESSION_REFRESH_MS: 2 * 60 * 60 * 1000,
+  WARMUP_RETRIES: 4,
+  WARMUP_DELAY: 7000,
+  MAX_QUERY_LEN: 200,
+  MAX_PAGE: 100,
 };
 
+// --------------------------------------------------
 // CACHES
-const searchCache = new NodeCache({ stdTTL: CFG.CACHE_SEARCH_TTL, checkperiod: 90,  useClones: false });
-const dlCache     = new NodeCache({ stdTTL: CFG.CACHE_DL_TTL,     checkperiod: 120, useClones: false });
+// --------------------------------------------------
+const searchCache = new NodeCache({ stdTTL: CFG.CACHE_SEARCH_TTL, checkperiod: 90, useClones: false });
+const dlCache = new NodeCache({ stdTTL: CFG.CACHE_DL_TTL, checkperiod: 120, useClones: false });
 
+// --------------------------------------------------
 // MIDDLEWARE
-app.use(cors({ origin: ‘*’, methods: [‘GET’, ‘OPTIONS’] }));
-app.use(express.json({ limit: ‘1mb’ }));
-app.use(function(_req, res, next) {
-res.setHeader(‘X-Content-Type-Options’, ‘nosniff’);
-res.setHeader(‘X-Frame-Options’, ‘DENY’);
-res.setHeader(‘X-Powered-By’, ‘VOID CINEMA API’);
-next();
+// --------------------------------------------------
+app.use(cors({ origin: "*", methods: ["GET", "OPTIONS"] }));
+app.use(express.json({ limit: "1mb" }));
+
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Powered-By", "VOID CINEMA API");
+  next();
 });
 
 const limiter = rateLimit({
-windowMs       : CFG.RATE_WINDOW_MS,
-max            : CFG.RATE_MAX,
-standardHeaders: true,
-legacyHeaders  : false,
-skip           : function() { return IS_SERVERLESS; },
-message        : { success: false, error: ‘Rate limit exceeded. Try again in 15 minutes.’ },
+  windowMs: CFG.RATE_WINDOW_MS,
+  max: CFG.RATE_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => IS_SERVERLESS,
+  message: { success: false, error: "Rate limit exceeded. Try again in 15 minutes." },
 });
 
+// --------------------------------------------------
 // BROWSER PROFILES
+// --------------------------------------------------
 const PROFILES = [
-{
-‘User-Agent’            : ‘Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36’,
-‘sec-ch-ua’             : ‘“Not(A:Brand”;v=“99”, “Google Chrome”;v=“133”, “Chromium”;v=“133”’,
-‘sec-ch-ua-mobile’      : ‘?0’,
-‘sec-ch-ua-platform’    : ‘“Windows”’,
-‘Accept’                : ‘text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8’,
-‘Accept-Language’       : ‘en-US,en;q=0.9’,
-‘Accept-Encoding’       : ‘gzip, deflate, br’,
-‘Connection’            : ‘keep-alive’,
-‘Upgrade-Insecure-Requests’: ‘1’,
-‘Sec-Fetch-Dest’        : ‘document’,
-‘Sec-Fetch-Mode’        : ‘navigate’,
-‘Sec-Fetch-Site’        : ‘none’,
-‘Sec-Fetch-User’        : ‘?1’,
-},
-{
-‘User-Agent’            : ‘Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36’,
-‘sec-ch-ua’             : ‘“Not(A:Brand”;v=“99”, “Google Chrome”;v=“133”, “Chromium”;v=“133”’,
-‘sec-ch-ua-mobile’      : ‘?0’,
-‘sec-ch-ua-platform’    : ‘“macOS”’,
-‘Accept’                : ‘text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8’,
-‘Accept-Language’       : ‘en-US,en;q=0.9’,
-‘Accept-Encoding’       : ‘gzip, deflate, br’,
-‘Connection’            : ‘keep-alive’,
-‘Upgrade-Insecure-Requests’: ‘1’,
-‘Sec-Fetch-Dest’        : ‘document’,
-‘Sec-Fetch-Mode’        : ‘navigate’,
-‘Sec-Fetch-Site’        : ‘none’,
-‘Sec-Fetch-User’        : ‘?1’,
-},
-{
-‘User-Agent’            : ‘Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0’,
-‘Accept’                : ‘text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8’,
-‘Accept-Language’       : ‘en-US,en;q=0.5’,
-‘Accept-Encoding’       : ‘gzip, deflate, br’,
-‘Connection’            : ‘keep-alive’,
-‘Upgrade-Insecure-Requests’: ‘1’,
-‘Sec-Fetch-Dest’        : ‘document’,
-‘Sec-Fetch-Mode’        : ‘navigate’,
-‘Sec-Fetch-Site’        : ‘none’,
-‘Sec-Fetch-User’        : ‘?1’,
-},
-{
-‘User-Agent’            : ‘Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36’,
-‘sec-ch-ua’             : ‘“Not(A:Brand”;v=“99”, “Google Chrome”;v=“133”, “Chromium”;v=“133”’,
-‘sec-ch-ua-mobile’      : ‘?0’,
-‘sec-ch-ua-platform’    : ‘“Linux”’,
-‘Accept’                : ‘text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8’,
-‘Accept-Language’       : ‘en-US,en;q=0.9’,
-‘Accept-Encoding’       : ‘gzip, deflate, br’,
-‘Connection’            : ‘keep-alive’,
-‘Upgrade-Insecure-Requests’: ‘1’,
-‘Sec-Fetch-Dest’        : ‘document’,
-‘Sec-Fetch-Mode’        : ‘navigate’,
-‘Sec-Fetch-Site’        : ‘none’,
-‘Sec-Fetch-User’        : ‘?1’,
-},
+  {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "sec-ch-ua": '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+  },
+  {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "sec-ch-ua": '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+  },
+  {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+  },
+  {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "sec-ch-ua": '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Linux"',
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+  },
 ];
 
 let profileIdx = 0;
-function nextProfile() { return PROFILES[profileIdx++ % PROFILES.length]; }
+function nextProfile() {
+  return PROFILES[profileIdx++ % PROFILES.length];
+}
 
+// --------------------------------------------------
 // COOKIE JAR
-const cookieJar = new Map([[‘lang’, ‘en’], [‘oslocale’, ‘en’]]);
+// --------------------------------------------------
+const cookieJar = new Map([
+  ["lang", "en"],
+  ["oslocale", "en"],
+]);
 
 function extractCookies(res) {
-const sc = res && res.headers && res.headers[‘set-cookie’];
-if (!Array.isArray(sc)) return;
-sc.forEach(function(raw) {
-const pair = raw.split(’;’)[0];
-const eq   = pair.indexOf(’=’);
-if (eq < 1) return;
-const key = pair.slice(0, eq).trim();
-const val = pair.slice(eq + 1).trim();
-if (key) cookieJar.set(key, val);
-});
+  const setCookie = res?.headers?.["set-cookie"];
+  if (!Array.isArray(setCookie)) return;
+  setCookie.forEach(raw => {
+    const pair = raw.split(";")[0];
+    const eqIdx = pair.indexOf("=");
+    if (eqIdx < 1) return;
+    const key = pair.slice(0, eqIdx).trim();
+    const val = pair.slice(eqIdx + 1).trim();
+    if (key) cookieJar.set(key, val);
+  });
 }
 
 function cookieHeader() {
-const parts = [];
-cookieJar.forEach(function(v, k) { parts.push(k + ‘=’ + v); });
-return parts.join(’; ’);
+  const parts = [];
+  cookieJar.forEach((val, key) => parts.push(key + "=" + val));
+  return parts.join("; ");
 }
 
+// --------------------------------------------------
 // TLS AGENT
+// --------------------------------------------------
 const TLS_AGENT = new https.Agent({
-keepAlive       : true,
-keepAliveMsecs  : 30000,
-maxSockets      : 20,
-minVersion      : ‘TLSv1.2’,
-honorCipherOrder: true,
-ciphers: [
-‘TLS_AES_128_GCM_SHA256’,
-‘TLS_AES_256_GCM_SHA384’,
-‘TLS_CHACHA20_POLY1305_SHA256’,
-‘ECDHE-RSA-AES128-GCM-SHA256’,
-‘ECDHE-ECDSA-AES128-GCM-SHA256’,
-‘ECDHE-RSA-AES256-GCM-SHA384’,
-].join(’:’),
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 20,
+  minVersion: "TLSv1.2",
+  honorCipherOrder: true,
+  ciphers: [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "ECDHE-RSA-AES128-GCM-SHA256",
+    "ECDHE-ECDSA-AES128-GCM-SHA256",
+    "ECDHE-RSA-AES256-GCM-SHA384",
+  ].join(":"),
 });
 
-// PROXY
-let PROXY = false;
-if (process.env.PROXY_URL) {
-try {
-const p = new URL(process.env.PROXY_URL);
-PROXY = { protocol: p.protocol.replace(’:’, ‘’), host: p.hostname, port: parseInt(p.port, 10) };
-if (p.username) PROXY.auth = { username: decodeURIComponent(p.username), password: decodeURIComponent(p.password) };
-console.log(’Proxy active: ’ + p.hostname);
-} catch(e) { console.warn(‘Invalid PROXY_URL’); }
-}
-
+// --------------------------------------------------
 // HTTP CLIENT
-function createClient(extra) {
-const headers = Object.assign({}, nextProfile(), { Cookie: cookieHeader() }, extra || {});
-return axios.create({
-timeout       : CFG.REQ_TIMEOUT,
-maxRedirects  : CFG.MAX_REDIRECTS,
-httpsAgent    : TLS_AGENT,
-proxy         : PROXY,
-decompress    : true,
-validateStatus: function() { return true; },
-headers       : headers,
-});
+// --------------------------------------------------
+function createClient(extraHeaders = {}) {
+  const headers = { ...nextProfile(), Cookie: cookieHeader(), ...extraHeaders };
+  const config = {
+    timeout: CFG.REQ_TIMEOUT,
+    maxRedirects: CFG.MAX_REDIRECTS,
+    httpsAgent: TLS_AGENT,
+    decompress: true,
+    validateStatus: () => true,
+    headers,
+  };
+  if (proxyAgent) {
+    config.httpsAgent = proxyAgent;
+    config.proxy = false;
+  }
+  return axios.create(config);
 }
 
-// UTILS
-function mkErr(type, msg, dbg) {
-const e = new Error(msg);
-e.type  = type;
-e.debug = IS_PROD ? null : (dbg || null);
-return e;
+// --------------------------------------------------
+// UTILITIES
+// --------------------------------------------------
+function mkErr(type, message, debug = null) {
+  const e = new Error(message);
+  e.type = type;
+  e.debug = IS_PROD ? null : debug;
+  return e;
 }
 
-function delay(mn, mx) {
-const ms = Math.floor(Math.random() * ((mx || CFG.DELAY_MAX) - (mn || CFG.DELAY_MIN) + 1)) + (mn || CFG.DELAY_MIN);
-return new Promise(function(r) { setTimeout(r, ms); });
+function delay(min = CFG.DELAY_MIN, max = CFG.DELAY_MAX) {
+  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+  return new Promise(r => setTimeout(r, ms));
 }
 
 function fmtBytes(b) {
-if (!b) return ‘0 B’;
-const u = [‘B’,‘KB’,‘MB’,‘GB’];
-const i = Math.floor(Math.log(b) / Math.log(1024));
-return (b / Math.pow(1024, i)).toFixed(2) + ’ ’ + u[i];
+  if (!b || b === 0) return "0 B";
+  const u = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(b) / Math.log(1024));
+  return (b / Math.pow(1024, i)).toFixed(2) + " " + u[i];
 }
 
 function fmtUptime(s) {
-return String(Math.floor(s/3600)).padStart(2,‘0’) + ‘:’ +
-String(Math.floor((s%3600)/60)).padStart(2,‘0’) + ‘:’ +
-String(Math.floor(s%60)).padStart(2,‘0’);
+  const h = String(Math.floor(s / 3600)).padStart(2, "0");
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const sec = String(Math.floor(s % 60)).padStart(2, "0");
+  return `${h}:${m}:${sec}`;
 }
 
-function isHtml(buf) {
-const s = Buffer.isBuffer(buf) ? buf.subarray(0,800).toString(‘utf8’) : String(buf).slice(0,800);
-return /<(html|!doctype|body|head)\b/i.test(s);
+function isHtmlBody(buf) {
+  const sample = Buffer.isBuffer(buf) ? buf.subarray(0, 800).toString("utf8") : String(buf).slice(0, 800);
+  return /<(html|!doctype|body|head)\b/i.test(sample);
 }
 
-// PARSER
+// --------------------------------------------------
+// PARSER (HTML search results) – hardened
+// --------------------------------------------------
 function parseSearchPage(html) {
-if (typeof html !== ‘string’ || !html) return null;
-const $ = cheerio.load(html);
-if ($(’#search_results’).length === 0) return null;
+  if (typeof html !== "string" || !html) return null;
+  const $ = cheerio.load(html);
+  if ($("#search_results").length === 0) return null;
 
-const results = [];
-$(’#search_results tbody tr’).each(function(_, row) {
-const $r = $(row);
-if ($r.hasClass(‘head’) || $r.attr(‘style’) === ‘display:none’ || !$r.attr(‘onclick’)) return;
+  const results = [];
+  $("#search_results tbody tr").each((_, row) => {
+    try {
+      const $r = $(row);
+      if ($r.hasClass("head") || $r.attr("style") === "display:none" || !$r.attr("onclick")) return;
 
-```
-const iM = ($r.attr('onclick')||'').match(/servOC\((\d+)/) || ($r.attr('id')||'').match(/name(\d+)/);
-if (!iM) return;
-const id = iM[1];
+      const onclick = $r.attr("onclick") || "";
+      const rowId = $r.attr("id") || "";
+      const idMatch = onclick.match(/servOC\((\d+)/) || rowId.match(/name(\d+)/);
+      if (!idMatch) return;
+      const id = idMatch[1];
 
-let title = $r.find('td:first-child strong a').first().text().trim();
-if (!title) return;
-let year = null;
-const ym = title.match(/\((\d{4})\)$/);
-if (ym) { year = ym[1]; title = title.replace(/\s*\(\d{4}\)$/, '').trim(); }
+      let title = $r.find("td:first-child strong a").first().text().trim();
+      if (!title) return;
+      let year = null;
+      const ym = title.match(/\((\d{4})\)$/);
+      if (ym) {
+        year = ym[1];
+        title = title.replace(/\s*\(\d{4}\)$/, "").trim();
+      }
 
-let lang = 'unknown';
-const lm = ($r.find('.flag').first().attr('class')||'').match(/flag\s+([a-z]{2})/);
-if (lm) lang = lm[1];
+      let language = "unknown";
+      const flagCls = $r.find(".flag").first().attr("class") || "";
+      const lm = flagCls.match(/flag\s+([a-z]{2})/);
+      if (lm) language = lm[1];
 
-let downloads = 0;
-const dl = $r.find('a[href*="subtitleserve"]').first();
-if (dl.length) downloads = parseInt(dl.text().replace(/[^\d]/g,''), 10) || 0;
+      let downloads = 0;
+      const dlLink = $r.find("a[href*='subtitleserve']").first();
+      if (dlLink.length) downloads = parseInt(dlLink.text().replace(/[^\d]/g, ""), 10) || 0;
 
-const uploader  = $r.find('td:last-child a').first().text().trim() || 'anonymous';
-const uploadDate= $r.find('time').first().text().trim() || null;
+      const uploader = $r.find("td:last-child a").first().text().trim() || "anonymous";
+      const uploadDate = $r.find("time").first().text().trim() || null;
 
-let filename = null;
-const st = $r.find('span[title]').first().attr('title');
-if (st && !/^\d+\s+votes?$/i.test(st)) filename = st;
+      let filename = null;
+      const spanTitle = $r.find("span[title]").first().attr("title");
+      if (spanTitle && !/^\d+\s+votes?$/i.test(spanTitle)) filename = spanTitle;
 
-const features = {
-  hd             : $r.find('img[src*="hd.gif"]').length             > 0,
-  hearingImpaired: $r.find('img[src*="hearing_impaired.gif"]').length > 0,
-  trusted        : $r.find('img[src*="from_trusted.gif"]').length    > 0,
-};
+      const features = {
+        hd: $r.find("img[src*='hd.gif']").length > 0,
+        hearingImpaired: $r.find("img[src*='hearing_impaired.gif']").length > 0,
+        trusted: $r.find("img[src*='from_trusted.gif']").length > 0,
+      };
 
-results.push({ id, title, year, language: lang, downloads, uploader, uploadDate, filename, features });
-```
-
-});
-
-return results;
+      results.push({ id, title, year, language, downloads, uploader, uploadDate, filename, features });
+    } catch (err) {
+      logger.warn({ err }, "Skipping a row due to parsing error");
+    }
+  });
+  return results;
 }
 
+// --------------------------------------------------
+// SIMPLEXML SEARCH (fallback)
+// --------------------------------------------------
+async function simpleXmlSearch(query) {
+  try {
+    const url = `https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-${encodeURIComponent(query)}/simplexml`;
+    const client = createClient({ Accept: "application/xml" });
+    const res = await client.get(url);
+    if (res.status !== 200) return null;
+    const $ = cheerio.load(res.data, { xmlMode: true });
+    const results = [];
+    $("subtitle").each((i, el) => {
+      results.push({
+        id: $(el).find("idsubtitle").text(),
+        title: $(el).find("moviename").text() || $(el).find("releasename").text(),
+        language: $(el).find("iso639").text(),
+        downloads: parseInt($(el).find("subdownloads").text(), 10) || 0,
+        filename: $(el).find("subfilename").text(),
+        uploader: $(el).find("userusername").text(),
+        uploadDate: $(el).find("subadddate").text(),
+        features: {
+          hd: $(el).find("subhd").text() === "1",
+          hearingImpaired: $(el).find("subhearing_impaired").text() === "1",
+        },
+      });
+    });
+    return results;
+  } catch (e) {
+    logger.warn({ err: e }, "SimpleXML search failed");
+    return null;
+  }
+}
+
+// --------------------------------------------------
 // SESSION WARM-UP
-let sessionReady   = false;
+// --------------------------------------------------
+let sessionReady = false;
 let sessionWarming = false;
 
-function warmUpSession(attempt) {
-attempt = attempt || 1;
-if (sessionWarming) return Promise.resolve();
-sessionWarming = true;
-console.log(’Warming up session (attempt ’ + attempt + ‘)…’);
-
-return createClient({ ‘Sec-Fetch-Site’: ‘none’ }).get(‘https://www.opensubtitles.org/en’)
-.then(function(res) {
-extractCookies(res);
-if (res.status === 200) { sessionReady = true; console.log(’Session ready. Cookies: ’ + cookieJar.size); }
-else throw new Error(’HTTP ’ + res.status);
-})
-.catch(function(err) {
-console.warn(’Warm-up ’ + attempt + ’ failed: ’ + err.message);
-if (attempt < CFG.WARMUP_RETRIES) {
-sessionWarming = false;
-return delay(CFG.WARMUP_DELAY, CFG.WARMUP_DELAY * 1.5).then(function() { return warmUpSession(attempt + 1); });
-}
-console.warn(‘Warm-up gave up.’);
-})
-.finally(function() { sessionWarming = false; });
-}
-
-// SEARCH
-function buildURLs(query, page) {
-const enc = encodeURIComponent(query);
-const off = (page - 1) * 40;
-return [
-‘https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-’ + enc + ‘/’ + page,
-‘https://www.opensubtitles.org/en/search2/sublanguageid-all/moviename-’ + enc + ‘/offset-’ + off + ‘/sort-7/asc-0’,
-];
-}
-
-function searchSubtitles(query, page) {
-page = page || 1;
-const ckey = ‘s:’ + query + ‘:’ + page;
-const hit  = searchCache.get(ckey);
-if (hit) return Promise.resolve(Object.assign({}, hit, { fromCache: true }));
-
-const urls = buildURLs(query, page);
-let lastErr = null;
-let att = 0;
-
-function run() {
-if (att >= CFG.SEARCH_RETRIES) return Promise.reject(lastErr || mkErr(‘search_failed’, ‘All attempts exhausted.’));
-const backoff = CFG.DELAY_MIN * Math.pow(1.5, att);
-const url = urls[att % urls.length];
-att++;
-
-```
-return delay(backoff, backoff + 1400)
-  .then(function() { return createClient({ Referer: 'https://www.opensubtitles.org/en' }).get(url); })
-  .then(function(res) {
+async function warmUpSession(attempt = 1) {
+  if (sessionWarming) return;
+  sessionWarming = true;
+  logger.info(`Warming up session (attempt ${attempt})...`);
+  const client = createClient({ "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1" });
+  try {
+    const res = await client.get("https://www.opensubtitles.org/en");
     extractCookies(res);
-    if (res.status === 403 || res.status === 429 || res.status === 503) {
-      console.warn('Status ' + res.status + ' - re-warming...');
-      lastErr = mkErr('blocked', 'HTTP ' + res.status);
-      return warmUpSession().then(run);
+    if (res.status === 200) {
+      sessionReady = true;
+      logger.info(`Session ready. Cookies: ${cookieJar.size}`);
+    } else {
+      throw new Error(`HTTP ${res.status}`);
     }
-    if (res.status !== 200) { lastErr = mkErr('search_failed', 'HTTP ' + res.status); return run(); }
-    if (typeof res.data === 'string' && res.data.indexOf('search_results') === -1) {
-      console.warn('Redirect detected - re-warming...');
-      lastErr = mkErr('redirected', 'Got homepage instead of results.');
-      return warmUpSession().then(run);
+  } catch (err) {
+    logger.warn(`Warm-up attempt ${attempt} failed: ${err.message}`);
+    if (attempt < CFG.WARMUP_RETRIES) {
+      sessionWarming = false;
+      await delay(CFG.WARMUP_DELAY, CFG.WARMUP_DELAY * 1.5);
+      return warmUpSession(attempt + 1);
     }
-    const results = parseSearchPage(res.data);
-    if (!results) { lastErr = mkErr('parse_failed', 'Could not parse page.'); return run(); }
-    results.sort(function(a,b) { return b.downloads - a.downloads; });
-    const payload = { query, page, total: results.length, fromCache: false, results };
-    searchCache.set(ckey, payload);
+    logger.warn("Warm-up gave up.");
+  } finally {
+    sessionWarming = false;
+  }
+}
+
+// --------------------------------------------------
+// SEARCH (with fallback)
+// --------------------------------------------------
+function buildSearchURLs(query, page) {
+  const enc = encodeURIComponent(query);
+  const offset = (page - 1) * 40;
+  return [
+    `https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-${enc}/${page}`,
+    `https://www.opensubtitles.org/en/search2/sublanguageid-all/moviename-${enc}/offset-${offset}/sort-7/asc-0`,
+  ];
+}
+
+async function searchSubtitles(query, page = 1) {
+  const cacheKey = `s:${query}:${page}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) return { ...cached, fromCache: true };
+
+  const urls = buildSearchURLs(query, page);
+  let lastError = null;
+  let attempt = 0;
+
+  while (attempt < CFG.SEARCH_RETRIES) {
+    const backoff = CFG.DELAY_MIN * Math.pow(1.5, attempt);
+    const url = urls[attempt % urls.length];
+    attempt++;
+    await delay(backoff, backoff + 1400);
+
+    try {
+      const client = createClient({ Referer: "https://www.opensubtitles.org/en" });
+      const res = await client.get(url);
+      extractCookies(res);
+
+      if (res.status === 403 || res.status === 429 || res.status === 503) {
+        logger.warn(`Status ${res.status} on attempt ${attempt} - re-warming...`);
+        lastError = mkErr("blocked", `Remote returned HTTP ${res.status}`);
+        await warmUpSession();
+        continue;
+      }
+      if (res.status !== 200) {
+        lastError = mkErr("search_failed", `Remote returned HTTP ${res.status}`);
+        continue;
+      }
+      if (typeof res.data === "string" && !res.data.includes("search_results")) {
+        logger.warn(`Got homepage redirect on attempt ${attempt} - re-warming...`);
+        lastError = mkErr("redirected", "OpenSubtitles redirected to homepage.");
+        await warmUpSession();
+        continue;
+      }
+
+      const results = parseSearchPage(res.data);
+      if (!results) {
+        logger.error(`Parse failed on attempt ${attempt}`);
+        lastError = mkErr("parse_failed", "Could not parse results page.");
+        continue;
+      }
+
+      results.sort((a, b) => b.downloads - a.downloads);
+      const payload = { query, page, total: results.length, fromCache: false, results };
+      searchCache.set(cacheKey, payload);
+      return payload;
+    } catch (err) {
+      if (err.type) throw err;
+      logger.error({ err }, `Network error attempt ${attempt}`);
+      lastError = mkErr("network_error", `Network failed: ${err.message}`);
+    }
+  }
+
+  // Fallback to SimpleXML if all attempts failed
+  logger.info("Falling back to SimpleXML search for:", query);
+  const fallbackResults = await simpleXmlSearch(query);
+  if (fallbackResults?.length) {
+    const payload = { query, page, total: fallbackResults.length, fromCache: false, results: fallbackResults };
+    searchCache.set(cacheKey, payload);
     return payload;
-  })
-  .catch(function(err) {
-    if (err.type) return Promise.reject(err);
-    lastErr = mkErr('network_error', 'Network: ' + err.message);
-    return run();
-  });
-```
+  }
 
-}
-return run();
+  throw lastError || mkErr("search_failed", "All search attempts exhausted.");
 }
 
+// --------------------------------------------------
+// FILTER BY LANGUAGE
+// --------------------------------------------------
 function filterByLanguage(data, lang) {
-if (!lang || lang === ‘all’) return data;
-const filtered = data.results.filter(function(r) { return r.language.toLowerCase() === lang.toLowerCase(); });
-return Object.assign({}, data, { language: lang, total: filtered.length, results: filtered });
+  if (!lang || lang === "all") return data;
+  const filtered = data.results.filter(r => r.language.toLowerCase() === lang.toLowerCase());
+  return { ...data, language: lang, total: filtered.length, results: filtered };
 }
 
-// DOWNLOAD
-function downloadSubtitle(id, hint) {
-const ckey = ‘dl:’ + id;
-const hit  = dlCache.get(ckey);
-if (hit) return Promise.resolve(hit);
+// --------------------------------------------------
+// DOWNLOAD SUBTITLE
+// --------------------------------------------------
+async function downloadSubtitle(id, hintFilename) {
+  const cacheKey = `dl:${id}`;
+  const cached = dlCache.get(cacheKey);
+  if (cached) return cached;
 
-const urls = [
-‘https://dl.opensubtitles.org/en/download/sub/’ + id,
-‘https://www.opensubtitles.org/en/subtitleserve/sub/’ + id,
-];
-let idx = 0;
+  const urls = [
+    `https://dl.opensubtitles.org/en/download/sub/${id}`,
+    `https://www.opensubtitles.org/en/subtitleserve/sub/${id}`,
+  ];
 
-function tryNext() {
-if (idx >= urls.length) return Promise.reject(mkErr(‘download_failed’, ‘All sources failed.’));
-const url = urls[idx++];
-return delay(CFG.DL_DELAY_MIN, CFG.DL_DELAY_MAX)
-.then(function() {
-return createClient({ Referer: ‘https://www.opensubtitles.org/en/subtitles/’ + id }).get(url, { responseType: ‘arraybuffer’ });
-})
-.then(function(res) {
-extractCookies(res);
-if (res.status !== 200) return tryNext();
-const buf = Buffer.from(res.data);
-if (buf.length < 16 || isHtml(buf)) return tryNext();
+  for (const url of urls) {
+    await delay(CFG.DL_DELAY_MIN, CFG.DL_DELAY_MAX);
+    const client = createClient({
+      Referer: `https://www.opensubtitles.org/en/subtitles/${id}`,
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "document",
+    });
+    try {
+      const res = await client.get(url, { responseType: "arraybuffer" });
+      extractCookies(res);
+      if (res.status !== 200) continue;
+      const buffer = Buffer.from(res.data);
+      if (buffer.length < 16) continue;
+      if (isHtmlBody(buffer)) continue;
 
-```
-    let ext  = 'srt';
-    let name = hint || null;
-    const cd  = res.headers['content-disposition'] || '';
-    const cdm = cd.match(/filename[^;=\n]*=(['"]?)([^\n'"]*)\1/i);
-    if (cdm && cdm[2]) name = path.basename(cdm[2]).replace(/[^\w.\-]/g,'_');
-    if (name) { const p = name.split('.'); if (p.length > 1) ext = p.pop().toLowerCase(); }
-    if (!name) name = 'subtitle_' + id + '.' + ext;
+      let ext = "srt";
+      let name = hintFilename || null;
+      const cd = res.headers["content-disposition"] || "";
+      const cdm = cd.match(/filename[^;=\n]*=(['"]?)([^\n'"]*)\1/i);
+      if (cdm?.[2]) name = path.basename(cdm[2]).replace(/[^\w.\-]/g, "_");
+      if (name) {
+        const parts = name.split(".");
+        if (parts.length > 1) ext = parts.pop().toLowerCase();
+      }
+      if (!name) name = `subtitle_${id}.${ext}`;
 
-    const result = { buffer: buf, ext, filename: name, size: buf.length };
-    dlCache.set(ckey, result);
-    return result;
-  })
-  .catch(function() { return tryNext(); });
-```
-
+      const result = { buffer, ext, filename: name, size: buffer.length };
+      dlCache.set(cacheKey, result);
+      return result;
+    } catch (err) {
+      logger.warn({ err }, `Download attempt failed for ${url}`);
+    }
+  }
+  throw mkErr("download_failed", "All download sources failed.");
 }
-return tryNext();
-}
 
+// --------------------------------------------------
 // VALIDATION
+// --------------------------------------------------
 function validateQuery(q) {
-if (!q || typeof q !== ‘string’) return ‘Missing parameter q’;
-if (!q.trim()) return ‘Query cannot be blank’;
-if (q.trim().length > CFG.MAX_QUERY_LEN) return ‘Query too long’;
-return null;
+  if (!q || typeof q !== "string") return "Missing required parameter q";
+  if (!q.trim()) return "Query cannot be blank";
+  if (q.trim().length > CFG.MAX_QUERY_LEN) return `Query too long (max ${CFG.MAX_QUERY_LEN} chars)`;
+  return null;
 }
-function validatePage(s) {
-if (!s) return 1;
-const n = parseInt(s, 10);
-if (isNaN(n) || n < 1 || n > CFG.MAX_PAGE) return null;
-return n;
-}
-function validateId(id) { return typeof id === ‘string’ && /^\d{1,12}$/.test(id.trim()); }
 
+function validatePage(str) {
+  if (str === undefined || str === null) return 1;
+  const n = parseInt(str, 10);
+  if (isNaN(n) || n < 1 || n > CFG.MAX_PAGE) return null;
+  return n;
+}
+
+function validateId(id) {
+  return typeof id === "string" && /^\d{1,12}$/.test(id.trim());
+}
+
+// --------------------------------------------------
 // BACKGROUND JOBS
+// --------------------------------------------------
 if (!IS_SERVERLESS) {
-if (NEEDS_PING) {
-setInterval(function() {
-axios.get(BASE_URL + ‘/health’, { timeout: 6000 })
-.then(function(r) { console.log(’Self-ping -> ’ + r.status); })
-.catch(function(e) { console.warn(’Ping failed: ’ + e.message); });
-}, CFG.SELF_PING_MS);
-}
-setInterval(function() { warmUpSession(); }, CFG.SESSION_REFRESH_MS);
-setInterval(function() {
-if (process.memoryUsage().heapUsed > CFG.MEMORY_LIMIT * CFG.MEMORY_WARN) {
-searchCache.flushAll(); dlCache.flushAll();
-if (typeof global.gc === ‘function’) global.gc();
-}
-}, 5 * 60 * 1000);
+  if (NEEDS_PING) {
+    setInterval(() => {
+      axios.get(`${BASE_URL}/health`, { timeout: 6000 })
+        .then(r => logger.info(`Self-ping ${new Date().toISOString()} -> ${r.status}`))
+        .catch(e => logger.warn(`Self-ping failed: ${e.message}`));
+    }, CFG.SELF_PING_MS);
+  }
+
+  setInterval(() => warmUpSession(), CFG.SESSION_REFRESH_MS);
+
+  setInterval(() => {
+    const heapUsed = process.memoryUsage().heapUsed;
+    if (heapUsed > CFG.MEMORY_LIMIT * CFG.MEMORY_WARN) {
+      logger.warn("Memory threshold exceeded - flushing caches");
+      searchCache.flushAll();
+      dlCache.flushAll();
+      if (typeof global.gc === "function") global.gc();
+    }
+  }, 5 * 60 * 1000);
 }
 
-// ROOT PAGE
-const ROOT = `<!DOCTYPE html>
-
+// --------------------------------------------------
+// ROOT PAGE (Beautiful Dashboard)
+// --------------------------------------------------
+const ROOT_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VOID CINEMA - Subtitle API</title>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@800&display=swap" rel="stylesheet">
-<style>
-:root{--bg:#07090e;--s:#0c0f18;--b:#1a2035;--a:#e2ff47;--a2:#47f4c8;--a3:#f447a8;--m:#3d4d6a;--m2:#5a6e90;--t:#b8c8e0;--w:#e8eef8}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--t);font-family:'Syne',sans-serif;min-height:100vh;overflow-x:hidden}
-body::before{content:'';position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(71,244,200,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(71,244,200,.02) 1px,transparent 1px);background-size:52px 52px}
-.glow{position:fixed;top:-300px;left:50%;transform:translateX(-50%);width:1000px;height:500px;pointer-events:none;background:radial-gradient(ellipse at 50% 0%,rgba(71,244,200,.05) 0%,transparent 65%)}
-main{position:relative;z-index:1;max-width:880px;margin:0 auto;padding:64px 24px 100px}
-header{margin-bottom:72px}
-.eye{font-family:'Space Mono',monospace;font-size:.65rem;letter-spacing:.22em;color:var(--a2);text-transform:uppercase;display:flex;align-items:center;gap:14px;margin-bottom:24px}
-.eye::before{content:'';width:36px;height:1px;background:var(--a2)}
-h1{font-size:clamp(2.6rem,7vw,4.4rem);line-height:.95;letter-spacing:-.04em;color:var(--w);font-weight:800}
-h1 .d{color:var(--m)} h1 .h{color:var(--a)} h1 .h2{color:var(--a2)}
-.tag{font-family:'Space Mono',monospace;font-size:.78rem;line-height:1.8;color:var(--m2);max-width:460px;margin-top:16px}
-.badges{display:flex;flex-wrap:wrap;gap:8px;margin:32px 0 64px}
-.badge{font-family:'Space Mono',monospace;font-size:.62rem;padding:4px 12px;border-radius:3px;border:1px solid #232b42;color:var(--m2);display:flex;align-items:center;gap:7px}
-.badge.live{border-color:rgba(71,244,200,.35);color:var(--a2)}
-.badge.live::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--a2);box-shadow:0 0 8px var(--a2);animation:blink 2s infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-.sl{font-family:'Space Mono',monospace;font-size:.6rem;letter-spacing:.25em;color:var(--m);text-transform:uppercase;padding-bottom:12px;margin-bottom:20px;border-bottom:1px solid var(--b)}
-.eps{display:flex;flex-direction:column;gap:1px;margin-bottom:64px}
-.ep{background:var(--s);border:1px solid var(--b);padding:22px 26px;transition:background .2s,border-color .2s;position:relative}
-.ep::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:transparent;transition:background .2s}
-.ep:hover{background:#111520;border-color:#232b42} .ep:hover::before{background:var(--a2)}
-.eh{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap}
-.mt{font-family:'Space Mono',monospace;font-size:.6rem;font-weight:700;padding:3px 9px;background:rgba(226,255,71,.08);color:var(--a);border-radius:3px}
-.eu{font-family:'Space Mono',monospace;font-size:.8rem;color:var(--w);word-break:break-all}
-.eu .p{color:var(--a2)} .eu .o{color:var(--m2)}
-.ed{font-size:.8rem;color:var(--m2);line-height:1.65;margin-bottom:12px}
-.ps{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-.pt{font-family:'Space Mono',monospace;font-size:.6rem;padding:2px 9px;border:1px solid var(--b);border-radius:3px;color:var(--m2)}
-.pt b{color:var(--t)} .pt.r{border-color:rgba(226,255,71,.2);color:rgba(226,255,71,.7)}
-.try{font-family:'Space Mono',monospace;font-size:.6rem;color:var(--a2);text-decoration:none;display:inline-flex;align-items:center;gap:5px;opacity:.65;transition:opacity .2s}
-.try:hover{opacity:1} .try::after{content:'->'}
-pre{background:var(--s);border:1px solid var(--b);padding:28px;overflow-x:auto;border-radius:3px;font-family:'Space Mono',monospace;font-size:.72rem;line-height:1.9;color:var(--t);margin-bottom:64px}
-.ck{color:var(--m2)} .cs{color:var(--a2)} .cn{color:var(--a)} .cb{color:#ff9f7f}
-.creds{background:var(--s);border:1px solid var(--b);padding:28px 30px;margin-bottom:64px;border-radius:3px}
-.ct{font-family:'Space Mono',monospace;font-size:.6rem;letter-spacing:.22em;color:var(--a3);text-transform:uppercase;margin-bottom:18px;display:flex;align-items:center;gap:10px}
-.ct::before{content:'';width:20px;height:1px;background:var(--a3)}
-.cr{display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--b)}
-.cr:last-child{border-bottom:none}
-.ca{width:34px;height:34px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:'Space Mono',monospace;font-size:.72rem;font-weight:700;background:#111520;border:1px solid #232b42}
-.ca.m{color:var(--a3);border-color:rgba(244,71,168,.3)}
-.ca.j{color:var(--a2);border-color:rgba(71,244,200,.3)}
-.ca.s{color:#ffb347;border-color:rgba(255,179,71,.3)}
-.cn2{font-size:.9rem;font-weight:700;color:var(--w)}
-.cr2{font-family:'Space Mono',monospace;font-size:.62rem;color:var(--m2)}
-.ch{margin-left:auto;font-size:1rem}
-footer{border-top:1px solid var(--b);padding-top:28px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
-footer span{font-family:'Space Mono',monospace;font-size:.6rem;color:var(--m)}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VOID CINEMA - Subtitle Proxy API</title>
+  <style>
+    :root{--bg:#07090e;--surface:#0c0f18;--surface2:#111520;--border:#1a2035;--border2:#232b42;--accent:#e2ff47;--accent2:#47f4c8;--accent3:#f447a8;--muted:#3d4d6a;--muted2:#5a6e90;--text:#b8c8e0;--white:#e8eef8;--mono:"Space Mono",monospace;--sans:"Syne",sans-serif;}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh}
+    .wrap{max-width:880px;margin:0 auto;padding:64px 24px}
+    h1{font-size:clamp(2.6rem,7vw,4.4rem);font-weight:800;line-height:.95;letter-spacing:-.04em;color:var(--white)}
+    h1 .dim{color:var(--muted)} h1 .hi{color:var(--accent)} h1 .hi2{color:var(--accent2)}
+    .badges{display:flex;flex-wrap:wrap;gap:8px;margin:32px 0}
+    .badge{padding:4px 12px;border-radius:3px;border:1px solid var(--border2);color:var(--muted2);font-family:var(--mono);font-size:.62rem}
+    .endpoint{background:var(--surface);border:1px solid var(--border);padding:22px;margin:10px 0}
+    .method{font-family:var(--mono);font-size:.6rem;background:rgba(226,255,71,.08);color:var(--accent);padding:3px 9px;border-radius:3px}
+    .url{font-family:var(--mono);font-size:.8rem;color:var(--white);margin-top:8px}
+    .desc{color:var(--muted2);margin:10px 0}
+    footer{margin-top:64px;border-top:1px solid var(--border);padding-top:28px;font-family:var(--mono);font-size:.6rem;color:var(--muted);text-align:center}
+  </style>
 </head>
 <body>
-<div class="glow"></div>
-<main>
-<header>
-<div class="eye">OpenSubtitles Proxy Infrastructure</div>
-<h1><span class="d">VOID</span><span class="h">.</span><br>CINEMA<br><span class="h2">API</span></h1>
-<p class="tag">Session-aware subtitle proxy. Multi-platform, cached, anti-block with retry backoff.</p>
-</header>
-<div class="badges">
-<span class="badge live">Online</span>
-<span class="badge">5 min cache</span>
-<span class="badge">Rate limited</span>
-<span class="badge">CORS enabled</span>
-<span class="badge">Session warm-up</span>
-<span class="badge">Exponential retry</span>
-<span class="badge">Cookie jar</span>
-<span class="badge">TLS optimized</span>
+<div class="wrap">
+  <h1><span class="dim">VOID</span><span class="hi">.</span><br>CINEMA<br><span class="hi2">API</span></h1>
+  <div class="badges">
+    <span class="badge">⚡ Ultra Peak v4.1</span>
+    <span class="badge">🛡️ Proxy ready</span>
+    <span class="badge">📦 Compressed</span>
+    <span class="badge">📊 Pino logs</span>
+  </div>
+  <div class="endpoint"><span class="method">GET</span><div class="url">/subtitle?action=search&q={query}&lang={lang}&page={n}</div><div class="desc">Search subtitles</div></div>
+  <div class="endpoint"><span class="method">GET</span><div class="url">/subtitle?action=download&id={id}</div><div class="desc">Download subtitle file</div></div>
+  <div class="endpoint"><span class="method">GET</span><div class="url">/languages?q={query}</div><div class="desc">Get available languages</div></div>
+  <div class="endpoint"><span class="method">GET</span><div class="url">/stats</div><div class="desc">Server stats</div></div>
+  <div class="endpoint"><span class="method">GET</span><div class="url">/health</div><div class="desc">Health check</div></div>
+  <footer>Built by Munax, Jerry, Sahid Ikka – MIT License</footer>
 </div>
-<div class="sl">Endpoints</div>
-<div class="eps">
-<div class="ep"><div class="eh"><span class="mt">GET</span><span class="eu">/subtitle?action=search&amp;<span class="p">q</span>={query}<span class="o">&amp;lang={lang}&amp;page={n}</span></span></div><p class="ed">Search subtitles by movie or TV show name. Sorted by downloads.</p><div class="ps"><span class="pt r"><b>q</b> required</span><span class="pt"><b>lang</b> en/ml/fr...</span><span class="pt"><b>page</b> 1-100</span></div><a class="try" href="/subtitle?action=search&q=inception&lang=en">Try it</a></div>
-<div class="ep"><div class="eh"><span class="mt">GET</span><span class="eu">/subtitle?action=download&amp;<span class="p">id</span>={id}</span></div><p class="ed">Download subtitle file by numeric ID from search results.</p><div class="ps"><span class="pt r"><b>id</b> required</span><span class="pt"><b>filename</b> optional</span></div><a class="try" href="/subtitle?action=download&id=3962439">Try it</a></div>
-<div class="ep"><div class="eh"><span class="mt">GET</span><span class="eu">/languages?<span class="p">q</span>={query}</span></div><p class="ed">Get all available language codes for a search query.</p><a class="try" href="/languages?q=inception">Try it</a></div>
-<div class="ep"><div class="eh"><span class="mt">GET</span><span class="eu">/stats</span></div><p class="ed">Uptime, memory, cache stats, session state.</p><a class="try" href="/stats">Try it</a></div>
-<div class="ep"><div class="eh"><span class="mt">GET</span><span class="eu">/health</span></div><p class="ed">Health check for deployment platforms.</p><a class="try" href="/health">Try it</a></div>
-</div>
-<div class="sl">Example Response</div>
-<pre><span class="ck">{</span>
-  <span class="cs">"success"</span><span class="ck">:</span> <span class="cn">true</span><span class="ck">,</span>
-  <span class="cs">"data"</span><span class="ck">: {</span>
-    <span class="cs">"query"</span><span class="ck">:</span>     <span class="cb">"inception"</span><span class="ck">,</span>
-    <span class="cs">"total"</span><span class="ck">:</span>     <span class="cn">40</span><span class="ck">,</span>
-    <span class="cs">"fromCache"</span><span class="ck">:</span> <span class="cn">false</span><span class="ck">,</span>
-    <span class="cs">"results"</span><span class="ck">: [{</span>
-      <span class="cs">"id"</span><span class="ck">:</span>        <span class="cb">"3962439"</span><span class="ck">,</span>
-      <span class="cs">"title"</span><span class="ck">:</span>     <span class="cb">"Inception"</span><span class="ck">,</span>
-      <span class="cs">"language"</span><span class="ck">:</span>  <span class="cb">"en"</span><span class="ck">,</span>
-      <span class="cs">"downloads"</span><span class="ck">:</span> <span class="cn">132434</span><span class="ck">,</span>
-      <span class="cs">"features"</span><span class="ck">: {</span> <span class="cs">"hd"</span><span class="ck">:</span> <span class="cn">true</span> <span class="ck">}</span>
-    <span class="ck">}]</span>
-  <span class="ck">}</span>
-<span class="ck">}</span></pre>
-<div class="sl">Built by</div>
-<div class="creds">
-<div class="ct">Credits</div>
-<div class="cr"><div class="ca m">M</div><div><div class="cn2">Munax</div><div class="cr2">Creator - Architect - Vision</div></div><span class="ch">&#129144;</span></div>
-<div class="cr"><div class="ca j">J</div><div><div class="cn2">Jerry</div><div class="cr2">Co-developer - Bug Fixer - Collaborator</div></div><span class="ch">&#129309;</span></div>
-<div class="cr"><div class="ca s">S</div><div><div class="cn2">Sahid Ikka</div><div class="cr2">Codebase Co-developer - Silent Force</div></div><span class="ch">&#129307;&#127995;</span></div>
-</div>
-<footer><span>VOID CINEMA API - Ultra Peak v4.0</span><span>Node.js - Express - Cheerio - Munax + Jerry</span></footer>
-</main>
 </body>
 </html>`;
 
+// --------------------------------------------------
 // ROUTES
-app.get(’/’, function(_req, res) {
-res.setHeader(‘Content-Type’, ‘text/html; charset=utf-8’);
-res.send(ROOT);
+// --------------------------------------------------
+app.get("/", (req, res) => {
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.send(ROOT_HTML);
 });
 
-app.get(’/languages’, limiter, function(req, res) {
-const qErr = validateQuery(req.query.q);
-if (qErr) return res.status(400).json({ success: false, error: qErr });
-searchSubtitles(req.query.q.trim())
-.then(function(data) {
-const seen = {}, langs = [];
-data.results.forEach(function(r) { if (!seen[r.language]) { seen[r.language]=true; langs.push(r.language); } });
-langs.sort();
-res.json({ success: true, query: req.query.q.trim(), fromCache: data.fromCache, count: langs.length, languages: langs });
-})
-.catch(function(e) { res.status(500).json({ success: false, error: e.type||‘internal’, message: e.message }); });
+app.get("/languages", limiter, async (req, res) => {
+  const qErr = validateQuery(req.query.q);
+  if (qErr) return res.status(400).json({ success: false, error: qErr });
+  try {
+    const data = await searchSubtitles(req.query.q.trim());
+    const languages = [...new Set(data.results.map(r => r.language))].sort();
+    res.json({ success: true, query: req.query.q, fromCache: data.fromCache, count: languages.length, languages });
+  } catch (e) {
+    logger.error({ err: e }, "[/languages]");
+    res.status(500).json({ success: false, error: e.type || "internal", message: e.message });
+  }
 });
 
-app.get(’/stats’, function(_req, res) {
-const ss = searchCache.getStats(), ds = dlCache.getStats(), mem = process.memoryUsage();
-res.json({
-success: true, uptime: Math.floor(process.uptime()), uptimeFormatted: fmtUptime(process.uptime()),
-platform: PLATFORM, sessionReady, cookieCount: cookieJar.size,
-memory: { rss: fmtBytes(mem.rss), heapUsed: fmtBytes(mem.heapUsed), heapTotal: fmtBytes(mem.heapTotal) },
-cache: { search: { keys: searchCache.keys().length, hits: ss.hits, misses: ss.misses }, download: { keys: dlCache.keys().length, hits: ds.hits, misses: ds.misses } },
-config: { searchTTL: CFG.CACHE_SEARCH_TTL, dlTTL: CFG.CACHE_DL_TTL, rateMax: CFG.RATE_MAX, retries: CFG.SEARCH_RETRIES, proxyActive: !!PROXY, selfPing: NEEDS_PING },
-credits: { creator: ‘Munax’, collaborator: ‘Jerry’, codeDev: ‘Sahid Ikka’ },
-timestamp: new Date().toISOString(),
-});
+app.get("/stats", (req, res) => {
+  const ss = searchCache.getStats();
+  const ds = dlCache.getStats();
+  const mem = process.memoryUsage();
+  res.json({
+    success: true,
+    uptime: Math.floor(process.uptime()),
+    uptimeFormatted: fmtUptime(process.uptime()),
+    platform: PLATFORM,
+    baseUrl: BASE_URL,
+    sessionReady,
+    cookieCount: cookieJar.size,
+    memory: { rss: fmtBytes(mem.rss), heapUsed: fmtBytes(mem.heapUsed), heapTotal: fmtBytes(mem.heapTotal) },
+    cache: {
+      search: { keys: searchCache.keys().length, hits: ss.hits, misses: ss.misses },
+      download: { keys: dlCache.keys().length, hits: ds.hits, misses: ds.misses },
+    },
+    config: { searchTTL: CFG.CACHE_SEARCH_TTL, dlTTL: CFG.CACHE_DL_TTL, rateMax: CFG.RATE_MAX, retries: CFG.SEARCH_RETRIES, proxyActive: !!proxyAgent, selfPing: NEEDS_PING, serverless: IS_SERVERLESS },
+    credits: { creator: "Munax", collaborator: "Jerry", codeDev: "Sahid Ikka" },
+    timestamp: new Date().toISOString(),
+  });
 });
 
-app.get(’/subtitle’, limiter, function(req, res) {
-const { action } = req.query;
+app.get("/subtitle", limiter, async (req, res) => {
+  const { action } = req.query;
+  if (action === "search") {
+    const qErr = validateQuery(req.query.q);
+    if (qErr) return res.status(400).json({ success: false, error: qErr });
+    const page = validatePage(req.query.page);
+    if (req.query.page !== undefined && page === null) {
+      return res.status(400).json({ success: false, error: "Page must be between 1 and 100." });
+    }
+    try {
+      const raw = await searchSubtitles(req.query.q.trim(), page || 1);
+      const result = req.query.lang ? filterByLanguage(raw, req.query.lang.trim()) : raw;
+      res.json({ success: true, data: result });
+    } catch (e) {
+      logger.error({ err: e }, "[/subtitle search]");
+      res.status(500).json({ success: false, error: e.type || "internal", message: e.message });
+    }
+    return;
+  }
+  if (action === "download") {
+    const id = req.query.id;
+    if (!validateId(id)) return res.status(400).json({ success: false, error: "Invalid or missing id." });
+    try {
+      const file = await downloadSubtitle(id.trim(), req.query.filename);
+      const mime = file.ext === "srt" ? "application/x-subrip" : "application/octet-stream";
+      res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+      res.setHeader("Content-Type", mime);
+      res.setHeader("Content-Length", file.size);
+      res.setHeader("X-File-Extension", file.ext);
+      res.send(file.buffer);
+    } catch (e) {
+      logger.error({ err: e }, "[/subtitle download]");
+      res.status(500).json({ success: false, error: e.type || "internal", message: e.message });
+    }
+    return;
+  }
+  res.status(400).json({ success: false, error: "Invalid action. Use search or download." });
+});
 
-if (action === ‘search’) {
-const qErr = validateQuery(req.query.q);
-if (qErr) return res.status(400).json({ success: false, error: qErr });
-const page = validatePage(req.query.page);
-if (req.query.page !== undefined && page === null) return res.status(400).json({ success: false, error: ‘Page must be 1-100.’ });
-searchSubtitles(req.query.q.trim(), page || 1)
-.then(function(raw) {
-const result = req.query.lang ? filterByLanguage(raw, req.query.lang.trim()) : raw;
-res.json({ success: true, data: result });
-})
-.catch(function(e) { res.status(500).json({ success: false, error: e.type||‘internal’, message: e.message, debug: e.debug }); });
-return;
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "healthy", uptime: Math.floor(process.uptime()), platform: PLATFORM, sessionReady });
+});
+
+app.get("/favicon.ico", (req, res) => res.status(204).end());
+
+app.use((req, res) => {
+  res.status(404).json({ success: false, error: "Endpoint not found." });
+});
+
+app.use((err, req, res, next) => {
+  logger.error({ err }, "Unhandled error");
+  res.status(500).json({ success: false, error: "server_error" });
+});
+
+// --------------------------------------------------
+// START
+// --------------------------------------------------
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    logger.info("================================================");
+    logger.info("  VOID CINEMA - OpenSubtitles Proxy API");
+    logger.info("  Ultra Peak Edition  v4.1  by Munax + Jerry");
+    logger.info("================================================");
+    logger.info(`  Platform  : ${PLATFORM}`);
+    logger.info(`  Port      : ${PORT}`);
+    logger.info(`  Proxy     : ${proxyAgent ? "✅ ACTIVE" : "❌ OFF"}`);
+    logger.info(`  Self-ping : ${NEEDS_PING ? "YES" : "OFF"}`);
+    logger.info("================================================");
+    warmUpSession();
+  });
 }
-
-if (action === ‘download’) {
-const { id, filename } = req.query;
-if (!validateId(id)) return res.status(400).json({ success: false, error: ‘Invalid id - must be numeric.’ });
-downloadSubtitle(id.trim(), filename||null)
-.then(function(file) {
-const mime = file.ext === ‘srt’ ? ‘application/x-subrip’ : ‘application/octet-stream’;
-res.setHeader(‘Content-Disposition’, ‘attachment; filename=”’ + file.filename + ‘”’);
-res.setHeader(‘Content-Type’, mime);
-res.setHeader(‘Content-Length’, file.size);
-res.send(file.buffer);
-})
-.catch(function(e) { res.status(500).json({ success: false, error: e.type||‘internal’, message: e.message }); });
-return;
-}
-
-res.status(400).json({ success: false, error: ‘Use action=search or action=download.’ });
-});
-
-app.get(’/health’, function(_req, res) {
-res.status(200).json({ status: ‘healthy’, uptime: Math.floor(process.uptime()), platform: PLATFORM, sessionReady, timestamp: new Date().toISOString() });
-});
-
-app.get(’/favicon.ico’, function(_req, res) { res.status(204).end(); });
-
-app.use(function(_req, res) { res.status(404).json({ success: false, error: ‘Not found.’ }); });
-app.use(function(err, _req, res, _next) { console.error(err); res.status(500).json({ success: false, error: ‘server_error’ }); });
 
 module.exports = app;
-
-if (require.main === module) {
-app.listen(PORT, function() {
-console.log(’================================================’);
-console.log(’  VOID CINEMA - OpenSubtitles Proxy API’);
-console.log(’  Ultra Peak Edition v4.0 - Munax + Jerry’);
-console.log(’  Platform : ’ + PLATFORM);
-console.log(’  Port     : ’ + PORT);
-console.log(’================================================’);
-warmUpSession();
-});
-}
