@@ -7,33 +7,17 @@ services:
       repository: github.com/munax07/Subtitle-api
       branch: main
     build:
-      buildpack:
-        build_command: npm install
-        run_command: npm start
-    env:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: "8000"
-      - key: CACHE_TTL_SEARCH
-        value: "300"
-      - key: CACHE_TTL_DL
-        value: "600"
-      - key: RATE_LIMIT_MAX
-        value: "100"
-      - key: MEMORY_LIMIT_MB
-        value: "512"
+      build_command: npm install
+      run_command: npm start
     ports:
-      - port: 8000
+      - port: 3000
         protocol: http
     healthchecks:
       - path: /health
-        port: 8000
+        port: 3000
         type: http
         interval: 30
         timeout: 10
-        unhealthy_threshold: 3
-        healthy_threshold: 1
     scaling:
       min: 1
       max: 1
