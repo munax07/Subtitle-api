@@ -1,5 +1,6 @@
 // ============================================================
-// server.js – ULTRA PEAK SUBTITLE API (Koyeb / Render / Cloud)
+// server.js – ULTRA PEAK SUBTITLE API (KOYEB/RENDER/CLOUD)
+//            – Now with Vercel reverse proxy support
 // ============================================================
 const express = require("express");
 const axios = require("axios");
@@ -36,17 +37,9 @@ const BASE_URL = (() => {
 app.set("trust proxy", PLATFORM === "vercel" ? false : 1);
 
 // ------------------------------------------------------------
-// Optional custom proxy (set PROXY_URL environment variable)
+// Environment variables
 // ------------------------------------------------------------
-let customProxyAgent = null;
-if (process.env.PROXY_URL) {
-  try {
-    customProxyAgent = new HttpsProxyAgent(process.env.PROXY_URL);
-    console.log("✅ Custom proxy configured");
-  } catch (e) {
-    console.warn("❌ Invalid PROXY_URL, continuing without custom proxy");
-  }
-}
+const PROXY_URL = process.env.PROXY_URL; // Your Vercel app URL, e.g. https://termux-proxy.vercel.app
 
 // ------------------------------------------------------------
 // Caches
@@ -55,18 +48,18 @@ const searchCache = new NodeCache({ stdTTL: 600 });      // 10 min
 const downloadCache = new NodeCache({ stdTTL: 1800 });   // 30 min
 
 // ------------------------------------------------------------
-// Proxy pool (free proxies – refreshed periodically)
+// Free proxy pool (for fallback when PROXY_URL isn't set or fails)
 // ------------------------------------------------------------
-let proxyList = [];           // all known proxies
-let workingProxies = [];      // proxies that have worked recently
+let proxyList = [];
+let workingProxies = [];
 let sessionCookie = "";
 let cookieJar = new Map();
 
 // ------------------------------------------------------------
-// Fetch free proxies from multiple sources
+// Fetch free proxies from multiple sources (fallback)
 // ------------------------------------------------------------
 async function refreshProxies() {
-  if (customProxyAgent) return; // skip if using a custom proxy
+  if (PROXY_URL) return; // if we have a PROXY_URL, we don't need free proxies
   try {
     console.log("🔄 Fetching free proxies...");
     const sources = [
@@ -84,7 +77,7 @@ async function refreshProxies() {
       .map(p => p.trim())
       .filter(p => p && p.includes(':') && !p.startsWith('#'))
       .map(p => p.replace(/\r$/, ''))
-      .slice(0, 200); // keep only the freshest 200
+      .slice(0, 200);
     
     proxyList = [...new Set(proxyList)];
     console.log(`✅ ${proxyList.length} free proxies loaded`);
@@ -95,7 +88,7 @@ async function refreshProxies() {
 }
 
 // ------------------------------------------------------------
-// Test a proxy – quickly check if it works with OpenSubtitles
+// Test a proxy (used for fallback)
 // ------------------------------------------------------------
 async function testProxy(proxy) {
   const agent = new HttpsProxyAgent(`http://${proxy}`);
@@ -112,7 +105,7 @@ async function testProxy(proxy) {
 }
 
 // ------------------------------------------------------------
-// Periodically validate working proxies (keeps the list fresh)
+// Validate working proxies (fallback)
 // ------------------------------------------------------------
 async function validateWorkingProxies() {
   if (workingProxies.length === 0) return;
@@ -160,6 +153,8 @@ const defaultHeaders = {
 async function warmUpSession() {
   console.log("🌡️  Warming up session...");
   try {
+    // If we have a PROXY_URL, we should warm up through it?
+    // But warm-up should ideally hit the target directly. Let's try direct first.
     const res = await axios.get("https://www.opensubtitles.org/en", {
       timeout: 10000,
       headers: defaultHeaders,
@@ -175,11 +170,35 @@ async function warmUpSession() {
 }
 
 // ------------------------------------------------------------
-// The heart – fastFetch with multiple strategies
+// The heart – fastFetch with support for Vercel reverse proxy
 // ------------------------------------------------------------
 async function fastFetch(url, responseType = "text") {
-  // 1) Try direct connection (if no custom proxy)
-  if (!customProxyAgent) {
+  // ------------------------------------------------------------------
+  // If PROXY_URL is set, we treat it as a reverse proxy prefix.
+  // We simply prepend it to the target URL.
+  // ------------------------------------------------------------------
+  if (PROXY_URL) {
+    const proxyTarget = `${PROXY_URL}/${url}`;
+    try {
+      const res = await axios.get(proxyTarget, {
+        timeout: 15000,
+        responseType,
+        headers: { ...defaultHeaders, Cookie: sessionCookie }
+      });
+      extractCookies(res);
+      console.log("🔌 Vercel reverse proxy OK");
+      return res;
+    } catch (e) {
+      console.log("➖ Vercel proxy failed, falling back to free proxy pool...");
+      // fall through to other methods
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Original fallback: direct connection + free proxy pool
+  // ------------------------------------------------------------------
+  // 1) Try direct connection (only if no PROXY_URL is set)
+  if (!PROXY_URL) {
     try {
       const res = await axios.get(url, {
         timeout: 8000,
@@ -196,24 +215,7 @@ async function fastFetch(url, responseType = "text") {
     }
   }
 
-  // 2) Use custom proxy if provided
-  if (customProxyAgent) {
-    try {
-      const res = await axios.get(url, {
-        httpsAgent: customProxyAgent,
-        timeout: 15000,
-        responseType,
-        headers: { ...defaultHeaders, Cookie: sessionCookie }
-      });
-      extractCookies(res);
-      console.log("🔌 Custom proxy OK");
-      return res;
-    } catch (e) {
-      console.log("➖ Custom proxy failed");
-    }
-  }
-
-  // 3) Try previously working proxies (fastest)
+  // 2) Try previously working proxies (fallback pool)
   if (workingProxies.length > 0) {
     for (const proxy of workingProxies) {
       try {
@@ -230,13 +232,12 @@ async function fastFetch(url, responseType = "text") {
           return res;
         }
       } catch (e) {
-        // remove dead one
         workingProxies = workingProxies.filter(p => p !== proxy);
       }
     }
   }
 
-  // 4) Try 3 random proxies from the pool
+  // 3) Try 3 random proxies from the pool
   const candidates = [...proxyList].sort(() => 0.5 - Math.random()).slice(0, 3);
   for (const proxy of candidates) {
     try {
@@ -250,12 +251,11 @@ async function fastFetch(url, responseType = "text") {
       if (res.status === 200) {
         extractCookies(res);
         workingProxies.unshift(proxy);
-        workingProxies = workingProxies.slice(0, 15); // keep 15 best
+        workingProxies = workingProxies.slice(0, 15);
         console.log(`✅ New working proxy: ${proxy}`);
         return res;
       }
     } catch (e) {
-      // remove dead from main list
       proxyList = proxyList.filter(p => p !== proxy);
     }
   }
@@ -270,7 +270,6 @@ function isMovieSubtitle(title) {
   if (!title) return false;
   const normalized = title.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // TV patterns – if any matches, it's NOT a movie
   const tvPatterns = [
     /S\d{2}[.\s-]*E\d{2}/i,
     /S\d{2}[.\s-]*Episode[.\s-]*\d+/i,
@@ -293,10 +292,8 @@ function isMovieSubtitle(title) {
   ];
   for (const p of tvPatterns) if (p.test(normalized)) return false;
 
-  // Year in parentheses => movie
   if (normalized.match(/\((19|20)\d{2}\)/)) return true;
 
-  // Movie quality indicators
   const movieIndicators = [
     /The Way of Water/i,
     /1080p|720p|4K/i,
@@ -306,7 +303,6 @@ function isMovieSubtitle(title) {
   ];
   for (const p of movieIndicators) if (p.test(normalized)) return true;
 
-  // Keep Avatar movies but not the series
   if (normalized.includes("Avatar") && !normalized.includes("Airbender")) return true;
 
   return false;
@@ -366,15 +362,13 @@ app.get("/search", async (req, res) => {
       });
     });
 
-    // Apply filters
     if (type === 'movie') results = results.filter(r => r.isMovie);
     if (lang && lang !== 'all') results = results.filter(r => r.lang.toLowerCase() === lang.toLowerCase());
 
-    // Sort
     if (!lang || lang === 'all') results = sortByLanguagePriority(results);
     else results.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
 
-    // Fallback for Avatar if empty
+    // Avatar fallback
     if (results.length === 0 && q.toLowerCase().includes('avatar')) {
       console.log("Trying specific Avatar movies...");
       for (const mq of ['Avatar 2009', 'Avatar The Way of Water 2022']) {
@@ -396,7 +390,6 @@ app.get("/search", async (req, res) => {
           });
         } catch { /* ignore */ }
       }
-      // Deduplicate
       const seen = new Set();
       results = results.filter(r => {
         if (seen.has(r.id)) return false;
@@ -417,7 +410,7 @@ app.get("/search", async (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Download endpoint with proper filename generation
+// Download endpoint
 // ------------------------------------------------------------
 app.get("/download", async (req, res) => {
   const { id, title } = req.query;
@@ -439,29 +432,12 @@ app.get("/download", async (req, res) => {
     if (buffer[0] === 0x1f && buffer[1] === 0x8b) buffer = zlib.gunzipSync(buffer);
     if (buffer.slice(0, 100).toString().includes("<!DOCTYPE")) throw new Error("Got HTML instead of subtitle");
 
-    // --- Intelligent filename generation ---
-    let finalFilename;
-    if (title) {
-      // Use provided title, sanitize
-      finalFilename = `${title.replace(/[^a-z0-9]/gi, '_')}.srt`;
-    } else {
-      // Try to extract from Content-Disposition header
-      const cd = resp.headers['content-disposition'] || '';
-      const match = cd.match(/filename[^;=\n]*=([^;]*)/);
-      if (match && match[1]) {
-        let name = match[1].replace(/['"]/g, '').trim();
-        // Ensure it ends with .srt (or .sub, .ass, etc.) – if not, add .srt
-        if (!name.match(/\.(srt|sub|ass|ssa)$/i)) name += '.srt';
-        finalFilename = name.replace(/[^a-z0-9.-]/gi, '_');
-      } else {
-        finalFilename = `subtitle_${id}.srt`;
-      }
-    }
+    const filename = title ? `${title.replace(/[^a-z0-9]/gi, '_')}.srt` : `subtitle_${id}.srt`;
 
-    downloadCache.set(cacheKey, { buffer, filename: finalFilename });
+    downloadCache.set(cacheKey, { buffer, filename });
 
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${finalFilename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(buffer);
   } catch (err) {
     console.error("Download error:", err);
@@ -508,7 +484,7 @@ app.get("/stats", (req, res) => {
     uptimeFormatted: uptimeStr,
     sessionReady: cookieJar.size > 0,
     cookieCount: cookieJar.size,
-    proxies: customProxyAgent ? "custom" : { total: proxyList.length, working: workingProxies.length },
+    proxies: PROXY_URL ? "custom (Vercel)" : { total: proxyList.length, working: workingProxies.length },
     memory: {
       rss: `${(mem.rss / 1024 / 1024).toFixed(2)} MB`,
       heapUsed: `${(mem.heapUsed / 1024 / 1024).toFixed(2)} MB`,
@@ -522,232 +498,70 @@ app.get("/stats", (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Health endpoint (for Koyeb)
+// Health endpoint
 // ------------------------------------------------------------
 app.get("/health", (req, res) => {
   res.json({ status: "healthy", platform: PLATFORM, uptime: process.uptime() });
 });
 
 // ------------------------------------------------------------
-// Root – beautiful dashboard with team footer
+// Root – simple dashboard
 // ------------------------------------------------------------
 app.get("/", (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html lang="en">
+  res.send(`
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🎬 Subtitle API – Ultra Peak</title>
-  <!-- Use a modern font -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
+  <title>🎬 Subtitle API – Live</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #0b0e14;
-      color: #e2e8f0;
-      font-family: "Inter", system-ui, -apple-system, sans-serif;
-      line-height: 1.6;
-      padding: 2rem 1.5rem;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-    }
-    .container {
-      max-width: 1200px;
-      width: 100%;
-    }
-    .hero {
-      text-align: center;
-      margin-bottom: 3rem;
-    }
-    .hero h1 {
-      font-size: 3rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, #f0a020, #00e2a8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin-bottom: 0.5rem;
-    }
-    .hero p {
-      color: #94a3b8;
-      font-size: 1.1rem;
-    }
-    .badge {
-      display: inline-block;
-      background: #1e293b;
-      color: #f0a020;
-      padding: 0.3rem 1rem;
-      border-radius: 999px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      margin-top: 1rem;
-      border: 1px solid #334155;
-    }
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 1rem;
-      margin: 2rem 0;
-    }
-    .stat-card {
-      background: #1a1f2c;
-      border: 1px solid #2d3748;
-      border-radius: 1rem;
-      padding: 1.5rem 1rem;
-      text-align: center;
-      transition: transform 0.2s, border-color 0.2s;
-    }
-    .stat-card:hover {
-      border-color: #f0a020;
-      transform: translateY(-4px);
-    }
-    .stat-value {
-      font-size: 2.2rem;
-      font-weight: 700;
-      color: #00e2a8;
-      line-height: 1.2;
-    }
-    .stat-label {
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #94a3b8;
-    }
-    .endpoints {
-      background: #111827;
-      border-radius: 1.5rem;
-      padding: 2rem;
-      margin: 2rem 0;
-      border: 1px solid #2d3748;
-    }
-    .endpoints h2 {
-      font-size: 1.8rem;
-      font-weight: 600;
-      color: #f0a020;
-      margin-bottom: 1.5rem;
-    }
-    .endpoint-item {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 1rem;
-      border-bottom: 1px solid #1e293b;
-      font-family: 'Courier New', monospace;
-      flex-wrap: wrap;
-    }
-    .endpoint-item:last-child {
-      border-bottom: none;
-    }
-    .method {
-      background: #00e2a8;
-      color: #0b0e14;
-      font-weight: 700;
-      padding: 0.2rem 0.8rem;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      text-transform: uppercase;
-    }
-    .path {
-      color: #e2e8f0;
-      font-size: 0.9rem;
-      word-break: break-word;
-    }
-    .desc {
-      color: #94a3b8;
-      font-size: 0.8rem;
-      margin-left: auto;
-    }
-    .footer {
-      margin-top: 4rem;
-      text-align: center;
-      border-top: 1px solid #1e293b;
-      padding-top: 2rem;
-      color: #64748b;
-    }
-    .footer strong {
-      color: #f0a020;
-      font-weight: 600;
-    }
-    .footer .team {
-      margin-top: 0.5rem;
-      font-size: 0.9rem;
-    }
-    .footer .team span {
-      color: #e2e8f0;
-      margin: 0 0.2rem;
-    }
-    @media (max-width: 640px) {
-      .hero h1 { font-size: 2rem; }
-      .endpoint-item { flex-direction: column; align-items: flex-start; }
-      .desc { margin-left: 0; }
-    }
+    body { font-family: 'Segoe UI', monospace; background: #0c0f18; color: #c8ccd8; margin: 40px; }
+    h1 { color: #e2ff47; }
+    .card { background: #1a1e2a; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #2a2e3a; }
+    .stat { display: inline-block; margin-right: 30px; }
+    .stat-value { font-size: 2em; font-weight: bold; color: #47f4c8; }
+    .stat-label { font-size: 0.8em; color: #6a7080; }
+    .endpoint { background: #252a38; padding: 10px; border-radius: 8px; margin: 10px 0; }
+    .endpoint code { color: #e2ff47; }
+    footer { margin-top: 40px; color: #4a5068; }
   </style>
 </head>
 <body>
-<div class="container">
-  <div class="hero">
-    <h1>🎬 ULTRA PEAK SUBTITLE API</h1>
-    <p>Malayalam • English • Any Language • 24/7 Cloud • No Phone Needed</p>
-    <div class="badge" id="platformBadge">🔥 ${PLATFORM.toUpperCase()} MODE</div>
+  <h1>🎬 ULTRA PEAK SUBTITLE API</h1>
+  <p>Platform: <strong>${PLATFORM}</strong> | Base URL: <code>${BASE_URL}</code></p>
+  <div class="card">
+    <h2>⚡ Live Status</h2>
+    <div id="stats">Loading...</div>
   </div>
-
-  <!-- Live stats will be injected via JS -->
-  <div class="stats-grid" id="statsGrid">
-    <div class="stat-card"><div class="stat-value" id="uptimeVal">--:--:--</div><div class="stat-label">uptime</div></div>
-    <div class="stat-card"><div class="stat-value" id="cookiesVal">0</div><div class="stat-label">session cookies</div></div>
-    <div class="stat-card"><div class="stat-value" id="proxiesVal">0</div><div class="stat-label">working proxies</div></div>
-    <div class="stat-card"><div class="stat-value" id="cacheVal">0</div><div class="stat-label">cache keys</div></div>
-    <div class="stat-card"><div class="stat-value" id="memoryVal">0 MB</div><div class="stat-label">heap used</div></div>
+  <div class="card">
+    <h2>📚 Example Requests</h2>
+    <div class="endpoint"><code>GET /search?q=Inception</code> – search all languages</div>
+    <div class="endpoint"><code>GET /search?q=Avatar&type=movie&lang=ml</code> – Malayalam first, only movies</div>
+    <div class="endpoint"><code>GET /download?id=4290587</code> – download subtitle</div>
+    <div class="endpoint"><code>GET /languages?q=Inception</code> – available languages</div>
+    <div class="endpoint"><code>GET /stats</code> – server stats</div>
+    <div class="endpoint"><code>GET /health</code> – health check</div>
   </div>
-
-  <div class="endpoints">
-    <h2>📡 Endpoints</h2>
-    <div class="endpoint-item"><span class="method">GET</span><span class="path">/search?q=Inception</span><span class="desc">search all languages</span></div>
-    <div class="endpoint-item"><span class="method">GET</span><span class="path">/search?q=Avatar&type=movie&lang=ml</span><span class="desc">Malayalam first, only movies</span></div>
-    <div class="endpoint-item"><span class="method">GET</span><span class="path">/download?id=4290587&title=Inception_2010</span><span class="desc">download with proper name</span></div>
-    <div class="endpoint-item"><span class="method">GET</span><span class="path">/languages?q=Inception</span><span class="desc">available languages</span></div>
-    <div class="endpoint-item"><span class="method">GET</span><span class="path">/stats</span><span class="desc">server telemetry</span></div>
-    <div class="endpoint-item"><span class="method">GET</span><span class="path">/health</span><span class="desc">health check</span></div>
-  </div>
-
-  <div class="footer">
-    <div>⚡ <strong>ULTRA PEAK EDITION v7.0</strong> ⚡</div>
-    <div class="team">
-      <span>Munax</span> 🎬 <span>Jerry</span> 🤝 <span>Sahid Ikka</span> 🤛🏻
-    </div>
-    <div style="margin-top:1rem; font-size:0.8rem;">Made with ❤️ for the subtitle community – now with perfect filenames!</div>
-  </div>
-</div>
-
-<script>
-  async function fetchStats() {
-    try {
+  <footer>Made with ❤️ – v7.0 (Vercel Proxy Ready)</footer>
+  <script>
+    async function loadStats() {
       const res = await fetch('/stats');
       const data = await res.json();
       if (!data.success) return;
-      document.getElementById('uptimeVal').innerText = data.uptimeFormatted || '--:--:--';
-      document.getElementById('cookiesVal').innerText = data.cookieCount || 0;
-      const proxyCount = data.proxies?.working || 0;
-      document.getElementById('proxiesVal').innerText = proxyCount;
-      const cacheKeys = (data.cache?.search?.keys || 0) + (data.cache?.download?.keys || 0);
-      document.getElementById('cacheVal').innerText = cacheKeys;
-      const heap = data.memory?.heapUsed || '0 MB';
-      document.getElementById('memoryVal').innerText = heap;
-    } catch (e) {
-      console.warn('Stats fetch failed');
+      const html = \`
+        <div class="stat"><span class="stat-value">\${data.uptimeFormatted}</span><br><span class="stat-label">uptime</span></div>
+        <div class="stat"><span class="stat-value">\${data.cookieCount}</span><br><span class="stat-label">cookies</span></div>
+        <div class="stat"><span class="stat-value">\${data.proxies?.working || 0}</span><br><span class="stat-label">working proxies</span></div>
+        <div class="stat"><span class="stat-value">\${data.cache.search.keys}</span><br><span class="stat-label">search cache</span></div>
+        <div class="stat"><span class="stat-value">\${data.memory.heapUsed}</span><br><span class="stat-label">heap used</span></div>
+      \`;
+      document.getElementById('stats').innerHTML = html;
     }
-  }
-  fetchStats();
-  setInterval(fetchStats, 10000);
-</script>
+    loadStats();
+    setInterval(loadStats, 10000);
+  </script>
 </body>
-</html>`);
+</html>
+  `);
 });
 
 // ------------------------------------------------------------
@@ -755,22 +569,18 @@ app.get("/", (req, res) => {
 // ------------------------------------------------------------
 async function startup() {
   console.log("╔════════════════════════════════════╗");
-  console.log("║   ULTRA PEAK SUBTITLE API v7.0    ║");
+  console.log("║   ULTRA PEAK SUBTITLE API v8.0    ║");
   console.log("║      Malayalam First Edition       ║");
   console.log("╚════════════════════════════════════╝");
   await refreshProxies();
   await warmUpSession();
 
-  // Keep session alive (refresh every 2 hours)
   setInterval(async () => {
     console.log("🔄 Periodic session refresh...");
     await warmUpSession();
   }, 2 * 60 * 60 * 1000);
 
-  // Validate working proxies every 10 minutes
   setInterval(validateWorkingProxies, 10 * 60 * 1000);
-
-  // Refresh proxy list every 30 minutes
   setInterval(refreshProxies, 30 * 60 * 1000);
 
   app.listen(PORT, () => {
