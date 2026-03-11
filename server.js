@@ -1,5 +1,5 @@
 // ============================================================
-// server.js – Ultra Peak Subtitle API (Koyeb / Render / Cloud)
+// server.js – ULTRA PEAK SUBTITLE API (Koyeb / Render / Cloud)
 // ============================================================
 const express = require("express");
 const axios = require("axios");
@@ -417,7 +417,7 @@ app.get("/search", async (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Download endpoint
+// Download endpoint with proper filename generation
 // ------------------------------------------------------------
 app.get("/download", async (req, res) => {
   const { id, title } = req.query;
@@ -439,11 +439,29 @@ app.get("/download", async (req, res) => {
     if (buffer[0] === 0x1f && buffer[1] === 0x8b) buffer = zlib.gunzipSync(buffer);
     if (buffer.slice(0, 100).toString().includes("<!DOCTYPE")) throw new Error("Got HTML instead of subtitle");
 
-    const filename = title ? `${title.replace(/[^a-z0-9]/gi, '_')}.srt` : `subtitle_${id}.srt`;
-    downloadCache.set(cacheKey, { buffer, filename });
+    // --- Intelligent filename generation ---
+    let finalFilename;
+    if (title) {
+      // Use provided title, sanitize
+      finalFilename = `${title.replace(/[^a-z0-9]/gi, '_')}.srt`;
+    } else {
+      // Try to extract from Content-Disposition header
+      const cd = resp.headers['content-disposition'] || '';
+      const match = cd.match(/filename[^;=\n]*=([^;]*)/);
+      if (match && match[1]) {
+        let name = match[1].replace(/['"]/g, '').trim();
+        // Ensure it ends with .srt (or .sub, .ass, etc.) – if not, add .srt
+        if (!name.match(/\.(srt|sub|ass|ssa)$/i)) name += '.srt';
+        finalFilename = name.replace(/[^a-z0-9.-]/gi, '_');
+      } else {
+        finalFilename = `subtitle_${id}.srt`;
+      }
+    }
+
+    downloadCache.set(cacheKey, { buffer, filename: finalFilename });
 
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${finalFilename}"`);
     res.send(buffer);
   } catch (err) {
     console.error("Download error:", err);
@@ -511,64 +529,225 @@ app.get("/health", (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Root – simple dashboard (HTML embedded)
+// Root – beautiful dashboard with team footer
 // ------------------------------------------------------------
 app.get("/", (req, res) => {
-  res.send(`
-<!DOCTYPE html>
-<html>
+  res.send(`<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>🎬 Subtitle API – Live</title>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎬 Subtitle API – Ultra Peak</title>
+  <!-- Use a modern font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Segoe UI', monospace; background: #0c0f18; color: #c8ccd8; margin: 40px; }
-    h1 { color: #e2ff47; }
-    .card { background: #1a1e2a; border-radius: 12px; padding: 20px; margin: 20px 0; border: 1px solid #2a2e3a; }
-    .stat { display: inline-block; margin-right: 30px; }
-    .stat-value { font-size: 2em; font-weight: bold; color: #47f4c8; }
-    .stat-label { font-size: 0.8em; color: #6a7080; }
-    .endpoint { background: #252a38; padding: 10px; border-radius: 8px; margin: 10px 0; }
-    .endpoint code { color: #e2ff47; }
-    footer { margin-top: 40px; color: #4a5068; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0b0e14;
+      color: #e2e8f0;
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
+      line-height: 1.6;
+      padding: 2rem 1.5rem;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    .container {
+      max-width: 1200px;
+      width: 100%;
+    }
+    .hero {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    .hero h1 {
+      font-size: 3rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #f0a020, #00e2a8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 0.5rem;
+    }
+    .hero p {
+      color: #94a3b8;
+      font-size: 1.1rem;
+    }
+    .badge {
+      display: inline-block;
+      background: #1e293b;
+      color: #f0a020;
+      padding: 0.3rem 1rem;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      margin-top: 1rem;
+      border: 1px solid #334155;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin: 2rem 0;
+    }
+    .stat-card {
+      background: #1a1f2c;
+      border: 1px solid #2d3748;
+      border-radius: 1rem;
+      padding: 1.5rem 1rem;
+      text-align: center;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .stat-card:hover {
+      border-color: #f0a020;
+      transform: translateY(-4px);
+    }
+    .stat-value {
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: #00e2a8;
+      line-height: 1.2;
+    }
+    .stat-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+    }
+    .endpoints {
+      background: #111827;
+      border-radius: 1.5rem;
+      padding: 2rem;
+      margin: 2rem 0;
+      border: 1px solid #2d3748;
+    }
+    .endpoints h2 {
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: #f0a020;
+      margin-bottom: 1.5rem;
+    }
+    .endpoint-item {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem;
+      border-bottom: 1px solid #1e293b;
+      font-family: 'Courier New', monospace;
+      flex-wrap: wrap;
+    }
+    .endpoint-item:last-child {
+      border-bottom: none;
+    }
+    .method {
+      background: #00e2a8;
+      color: #0b0e14;
+      font-weight: 700;
+      padding: 0.2rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+    }
+    .path {
+      color: #e2e8f0;
+      font-size: 0.9rem;
+      word-break: break-word;
+    }
+    .desc {
+      color: #94a3b8;
+      font-size: 0.8rem;
+      margin-left: auto;
+    }
+    .footer {
+      margin-top: 4rem;
+      text-align: center;
+      border-top: 1px solid #1e293b;
+      padding-top: 2rem;
+      color: #64748b;
+    }
+    .footer strong {
+      color: #f0a020;
+      font-weight: 600;
+    }
+    .footer .team {
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .footer .team span {
+      color: #e2e8f0;
+      margin: 0 0.2rem;
+    }
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 2rem; }
+      .endpoint-item { flex-direction: column; align-items: flex-start; }
+      .desc { margin-left: 0; }
+    }
   </style>
 </head>
 <body>
-  <h1>🎬 ULTRA PEAK SUBTITLE API</h1>
-  <p>Platform: <strong>${PLATFORM}</strong> | Base URL: <code>${BASE_URL}</code></p>
-  <div class="card">
-    <h2>⚡ Live Status</h2>
-    <div id="stats">Loading...</div>
+<div class="container">
+  <div class="hero">
+    <h1>🎬 ULTRA PEAK SUBTITLE API</h1>
+    <p>Malayalam • English • Any Language • 24/7 Cloud • No Phone Needed</p>
+    <div class="badge" id="platformBadge">🔥 ${PLATFORM.toUpperCase()} MODE</div>
   </div>
-  <div class="card">
-    <h2>📚 Example Requests</h2>
-    <div class="endpoint"><code>GET /search?q=Inception</code> – search all languages</div>
-    <div class="endpoint"><code>GET /search?q=Avatar&type=movie&lang=ml</code> – Malayalam first, only movies</div>
-    <div class="endpoint"><code>GET /download?id=4290587</code> – download subtitle</div>
-    <div class="endpoint"><code>GET /languages?q=Inception</code> – available languages</div>
-    <div class="endpoint"><code>GET /stats</code> – server stats</div>
-    <div class="endpoint"><code>GET /health</code> – health check</div>
+
+  <!-- Live stats will be injected via JS -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-card"><div class="stat-value" id="uptimeVal">--:--:--</div><div class="stat-label">uptime</div></div>
+    <div class="stat-card"><div class="stat-value" id="cookiesVal">0</div><div class="stat-label">session cookies</div></div>
+    <div class="stat-card"><div class="stat-value" id="proxiesVal">0</div><div class="stat-label">working proxies</div></div>
+    <div class="stat-card"><div class="stat-value" id="cacheVal">0</div><div class="stat-label">cache keys</div></div>
+    <div class="stat-card"><div class="stat-value" id="memoryVal">0 MB</div><div class="stat-label">heap used</div></div>
   </div>
-  <footer>Made with ❤️ for the subtitle community – v7.0 (Koyeb Peak)</footer>
-  <script>
-    async function loadStats() {
+
+  <div class="endpoints">
+    <h2>📡 Endpoints</h2>
+    <div class="endpoint-item"><span class="method">GET</span><span class="path">/search?q=Inception</span><span class="desc">search all languages</span></div>
+    <div class="endpoint-item"><span class="method">GET</span><span class="path">/search?q=Avatar&type=movie&lang=ml</span><span class="desc">Malayalam first, only movies</span></div>
+    <div class="endpoint-item"><span class="method">GET</span><span class="path">/download?id=4290587&title=Inception_2010</span><span class="desc">download with proper name</span></div>
+    <div class="endpoint-item"><span class="method">GET</span><span class="path">/languages?q=Inception</span><span class="desc">available languages</span></div>
+    <div class="endpoint-item"><span class="method">GET</span><span class="path">/stats</span><span class="desc">server telemetry</span></div>
+    <div class="endpoint-item"><span class="method">GET</span><span class="path">/health</span><span class="desc">health check</span></div>
+  </div>
+
+  <div class="footer">
+    <div>⚡ <strong>ULTRA PEAK EDITION v7.0</strong> ⚡</div>
+    <div class="team">
+      <span>Munax</span> 🎬 <span>Jerry</span> 🤝 <span>Sahid Ikka</span> 🤛🏻
+    </div>
+    <div style="margin-top:1rem; font-size:0.8rem;">Made with ❤️ for the subtitle community – now with perfect filenames!</div>
+  </div>
+</div>
+
+<script>
+  async function fetchStats() {
+    try {
       const res = await fetch('/stats');
       const data = await res.json();
       if (!data.success) return;
-      const html = \`
-        <div class="stat"><span class="stat-value">\${data.uptimeFormatted}</span><br><span class="stat-label">uptime</span></div>
-        <div class="stat"><span class="stat-value">\${data.cookieCount}</span><br><span class="stat-label">cookies</span></div>
-        <div class="stat"><span class="stat-value">\${data.proxies?.working || 0}</span><br><span class="stat-label">working proxies</span></div>
-        <div class="stat"><span class="stat-value">\${data.cache.search.keys}</span><br><span class="stat-label">search cache</span></div>
-        <div class="stat"><span class="stat-value">\${data.memory.heapUsed}</span><br><span class="stat-label">heap used</span></div>
-      \`;
-      document.getElementById('stats').innerHTML = html;
+      document.getElementById('uptimeVal').innerText = data.uptimeFormatted || '--:--:--';
+      document.getElementById('cookiesVal').innerText = data.cookieCount || 0;
+      const proxyCount = data.proxies?.working || 0;
+      document.getElementById('proxiesVal').innerText = proxyCount;
+      const cacheKeys = (data.cache?.search?.keys || 0) + (data.cache?.download?.keys || 0);
+      document.getElementById('cacheVal').innerText = cacheKeys;
+      const heap = data.memory?.heapUsed || '0 MB';
+      document.getElementById('memoryVal').innerText = heap;
+    } catch (e) {
+      console.warn('Stats fetch failed');
     }
-    loadStats();
-    setInterval(loadStats, 10000);
-  </script>
+  }
+  fetchStats();
+  setInterval(fetchStats, 10000);
+</script>
 </body>
-</html>
-  `);
+</html>`);
 });
 
 // ------------------------------------------------------------
@@ -576,7 +755,7 @@ app.get("/", (req, res) => {
 // ------------------------------------------------------------
 async function startup() {
   console.log("╔════════════════════════════════════╗");
-  console.log("║   OPENSUBTITLE API v7.0    ║");
+  console.log("║   ULTRA PEAK SUBTITLE API v7.0    ║");
   console.log("║      Malayalam First Edition       ║");
   console.log("╚════════════════════════════════════╝");
   await refreshProxies();
