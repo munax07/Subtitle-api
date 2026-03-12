@@ -1,14 +1,19 @@
 <div align="center">
 
 <br>
+<br>
 
-# V O I D   C I N E M A
+# ⍟   V O I D   C I N E M A   ⍟
 
 <br>
 
-**OpenSubtitles Proxy API**
+<sup>O P E N S U B T I T L E S   P R O X Y   I N F R A S T R U C T U R E</sup>
 
-<sub>Ultra Peak v13.0  ·  Malayalam First  ·  Proxy Rotation  ·  Auto-title  ·  Silent Precision</sub>
+<br>
+
+
+> *Unlimited search. Malayalam-first. Auto-title. Proxy rotation.*
+> *Session warmup. ZIP extraction. Silent precision.*
 
 <br>
 
@@ -16,56 +21,42 @@
 
 <br>
 
-[![Live](https://img.shields.io/badge/status-live-gold?style=flat-square&color=b8965a&labelColor=000)](https://powerful-sib-mujaiwow-0209e698.koyeb.app)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-gold?style=flat-square&color=b8965a&labelColor=000)](https://nodejs.org)
-[![Platform](https://img.shields.io/badge/platform-koyeb-gold?style=flat-square&color=b8965a&labelColor=000)](https://koyeb.com)
+[![](https://img.shields.io/badge/status-live-00e5ff?style=flat-square&logo=koyeb&logoColor=white&labelColor=0a0c10)](https://powerful-sib-mujaiwow-0209e698.koyeb.app) 
+[![](https://img.shields.io/badge/version-v13.0-b8965a?style=flat-square&labelColor=0a0c10)]() 
+[![](https://img.shields.io/badge/node-%3E%3D18-ffb74d?style=flat-square&logo=node.js&logoColor=white&labelColor=0a0c10)]() 
+[![](https://img.shields.io/badge/license-MIT-444?style=flat-square&labelColor=0a0c10)]()
+
+<br>
+<br>
+
+-----
 
 </div>
 
 <br>
 
------
-
-<br>
-
-##   Endpoints
-
-<br>
-
-|  Method|Route                                              |Description                    |
-|--------|---------------------------------------------------|-------------------------------|
-|  `GET` |`/search?q={query}`                                |Search subtitles — unlimited   |
-|  `GET` |`/search?q={query}&lang={code}&type={movie|series}`|Filtered search                |
-|  `GET` |`/download?id={id}`                                |Download subtitle — auto-title |
-|  `GET` |`/languages?q={query}`                             |Available languages for a title|
-|  `GET` |`/stats`                                           |Live server stats              |
-|  `GET` |`/health`                                          |Health check                   |
-
-<br>
-
------
-
-<br>
-
-##   Quick Start
+## ▸   Quick Start
 
 <br>
 
 ```bash
-# Search
-GET /search?q=Inception
+# Search — unlimited, no auth
+curl "https://powerful-sib-mujaiwow-0209e698.koyeb.app/search?q=inception"
 
-# Malayalam — always priority
-GET /search?q=Vikram&lang=ml&type=movie
+# Malayalam — always sorted first
+curl "https://powerful-sib-mujaiwow-0209e698.koyeb.app/search?q=vikram&lang=ml&type=movie"
 
 # English
-GET /search?q=fight+club&lang=en
+curl "https://powerful-sib-mujaiwow-0209e698.koyeb.app/search?q=fight+club&lang=en"
 
-# Download — filename auto-resolved from meta cache
-GET /download?id=3962439
+# Download — filename resolved automatically
+curl -OJ "https://powerful-sib-mujaiwow-0209e698.koyeb.app/download?id=3962439"
 
-# Languages available for a title
-GET /languages?q=Inception
+# Available languages for a title
+curl "https://powerful-sib-mujaiwow-0209e698.koyeb.app/languages?q=inception"
+
+# Live server stats
+curl "https://powerful-sib-mujaiwow-0209e698.koyeb.app/stats"
 ```
 
 <br>
@@ -74,7 +65,26 @@ GET /languages?q=Inception
 
 <br>
 
-##   Response
+## ▸   Endpoints
+
+<br>
+
+| |Method|Route                                              |Description                 |
+|-|------|---------------------------------------------------|----------------------------|
+|🔍|`GET` |`/search?q={query}`                                |Search subtitles            |
+|🔍|`GET` |`/search?q={query}&lang={code}&type={movie|series}`|Filtered search             |
+|⬇️|`GET` |`/download?id={id}`                                |Download `.srt` — auto‑title|
+|🌐|`GET` |`/languages?q={query}`                             |Languages for a title       |
+|📊|`GET` |`/stats`                                           |Live server stats           |
+|🩺|`GET` |`/health`                                          |Health check                |
+
+<br>
+
+-----
+
+<br>
+
+## ▸   Response
 
 <br>
 
@@ -105,7 +115,8 @@ GET /languages?q=Inception
 <br>
 
 
-> Download returns the raw `.srt` file directly. No `&title=` param needed — filename is resolved automatically from the meta cache.
+> `/download` returns the raw `.srt` file directly.
+> Filename is resolved from the meta cache — no `&title=` param needed.
 
 <br>
 
@@ -113,24 +124,58 @@ GET /languages?q=Inception
 
 <br>
 
-##   Architecture
+## ▸   Language Codes
+
+<br>
+
+|Code|Language |Priority        |
+|----|---------|----------------|
+|`ml`|Malayalam|**Always first**|
+|`en`|English  |2nd             |
+|`ta`|Tamil    |                |
+|`hi`|Hindi    |                |
+|`te`|Telugu   |                |
+|`fr`|French   |                |
+|`es`|Spanish  |                |
+|`de`|German   |                |
+|`ja`|Japanese |                |
+|`ko`|Korean   |                |
+|`zh`|Chinese  |                |
+
+<br>
+
+
+> Malayalam is auto-detected from your query and prioritised automatically.
+> You don’t need to pass `&lang=ml` for it to work.
+
+<br>
+
+-----
+
+<br>
+
+## ▸   Architecture
 
 <br>
 
 ```
-Search   ──▶  simpleXML scraping        unlimited, no auth required
-Download ──▶  Official REST API         if OS_API_KEY is set
-             └─▶ Scraper fallback       automatic on failure
+Search   ──▶  simpleXML scraping          unlimited · no login required
+Download ──▶  Official REST API           if OS credentials configured
+              └──▶ Scraper fallback       automatic on any failure
 
-Auto-title ◀── Meta cache              subtitle ID → release filename
-Proxy      ──▶  Primary + up to 20     auto-rotates on 2 consecutive fails
-Session    ──▶  Browser-mimicked       cookies, UA, auto-refresh
-Requests   ──▶  Queued on cold start   nothing fires until session is ready
+Auto-title ◀── Meta cache                subtitle ID → real release filename
+                                          stored during search, used at download
 
-Cache
-  Search   ────────────────────────── 600s
-  Download ────────────────────────── 1800s
-  Meta     ────────────────────────── 3600s
+Proxy pool ──▶  PROXY_URL (primary)      
+                BACKUP_PROXY_1..20       auto-rotates on 2 consecutive fails
+
+Session    ──▶  Browser-mimicked         cookies · user-agent · auto-refresh
+Cold start ──▶  Request queue            all requests wait until session is warm
+
+Cache layers
+  Search   ──────────────────────────────────────────  600s
+  Download ──────────────────────────────────────────  1800s
+  Meta     ──────────────────────────────────────────  3600s
 ```
 
 <br>
@@ -139,53 +184,31 @@ Cache
 
 <br>
 
-##   Language Priority
-
-<br>
-
-|Code|Language |              |
-|----|---------|--------------|
-|`ml`|Malayalam|← always first|
-|`en`|English  |              |
-|`ta`|Tamil    |              |
-|`hi`|Hindi    |              |
-|`te`|Telugu   |              |
-|`fr`|French   |              |
-|`es`|Spanish  |              |
-|`de`|German   |              |
-|`ja`|Japanese |              |
-|`ko`|Korean   |              |
-|`zh`|Chinese  |              |
-
-<br>
-
-
-> Malayalam is auto-detected and sorted first regardless of query language.
-
-<br>
-
------
-
-<br>
-
-##   Deploy — Koyeb
+## ▸   Deploy — Koyeb
 
 <br>
 
 ```bash
-# 1. Fork this repo
-# 2. Connect GitHub to Koyeb → New App
+# 1  Fork this repo
+# 2  Koyeb → New App → GitHub → select your fork
+# 3  Set environment variables below
+# 4  Deploy
+```
 
-# Required env vars
+<br>
+
+```env
+# Primary proxy — required for best results
 PROXY_URL=http://user:pass@host:port
 
-# Optional backup rotation (up to 20)
+# Backup rotation — up to 20 supported
 BACKUP_PROXY_1=http://user:pass@host:port
 BACKUP_PROXY_2=http://user:pass@host:port
 
-# Optional — 100 reliable downloads/day free
-# register at opensubtitles.com/en/consumers
-OS_API_KEY=your_key
+# Official API — optional
+# 100 reliable downloads/day free
+# Register → opensubtitles.com/en/consumers
+OS_API_KEY=your_api_key
 OS_USERNAME=your_username
 OS_PASSWORD=your_password
 ```
@@ -196,7 +219,7 @@ OS_PASSWORD=your_password
 
 <br>
 
-##   Run Locally
+## ▸   Run Locally
 
 <br>
 
@@ -207,7 +230,10 @@ npm install
 npm start
 ```
 
-<sub>Requires Node.js ≥ 18</sub>
+<br>
+
+
+> Requires Node.js ≥ 18
 
 <br>
 
@@ -215,19 +241,21 @@ npm start
 
 <br>
 
-##   Stack
+## ▸   Response Headers
 
 <br>
 
 ```
-Runtime      Node.js 20 + Express 4
-Deploy       Koyeb — auto-ping, graceful shutdown
-Search       OpenSubtitles simpleXML
-Download     REST API + cheerio scraper
-Proxy        https-proxy-agent — rotation pool
-Cache        node-cache — three independent stores
-Compression  gzip via compression middleware
+X-Request-ID      unique ID per request — use for debugging
+X-Response-Time   response latency in ms
+ETag              on search responses — supports If-None-Match → 304
+Retry-After       on 429 — tells client when to retry
 ```
+
+<br>
+
+
+> Rate limit — `100 requests / 15 min / IP`
 
 <br>
 
@@ -235,34 +263,27 @@ Compression  gzip via compression middleware
 
 <br>
 
-##   Headers
+## ▸   Dashboard
 
 <br>
 
-Every response includes:
+The root `/` serves a live dashboard with a **dark ↔ light** toggle.
 
-```
-X-Request-ID      unique per request — for debugging
-X-Response-Time   latency in ms
-ETag              search responses — supports If-None-Match → 304
-Retry-After       on 429 rate limit responses
-```
-
-Rate limit: `100 requests / 15 min / IP`
+Built with Bodoni Moda serif and Fragment Mono — two colorways, one file.
+Stats auto‑refresh every 12 seconds.
 
 <br>
 
------
-
-<br>
-
-##   Dashboard
-
-<br>
-
-The root `/` serves a live dashboard — dark and light mode with one toggle.
-
-Live stats refresh every 12 seconds — uptime, cache keys, heap, proxy pool, session status, API quota.
+|Stat        |Description                     |
+|------------|--------------------------------|
+|Uptime      |Hours since last cold start     |
+|Search Cache|Active search result keys       |
+|Meta Cache  |Subtitle metadata keys          |
+|DL Buffer   |Cached download files           |
+|Heap        |Node.js memory usage            |
+|Session     |Warmup status                   |
+|Proxy       |Active proxy in rotation        |
+|Quota       |Official API usage if configured|
 
 <br>
 
@@ -273,12 +294,19 @@ Live stats refresh every 12 seconds — uptime, cache keys, heap, proxy pool, se
 
 <div align="center">
 
+<br>
+
+**Built with precision. No shortcuts.**
+
+<br>
+
 ```
 architecture by munax
 ```
 
 <sub>[instagram.com/munavi.r_](https://instagram.com/munavi.r_)</sub>
 
+<br>
 <br>
 
 </div>
