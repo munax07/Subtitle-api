@@ -420,7 +420,7 @@ return 'unknown';
 //  Priority: XML subfilename > Content-Disposition > ZIP entry > constructed
 // =============================================================================
 function generateFilename(id, meta, cdHeader = '', zipEntry = null) {
-const toSafe = s => s.replace(/[^a-z0-9.-*()]/gi, '*').replace(/\*+/g, '*').replace(/^\*|\*$/g, '');
+const toSafe = s => s.replace(/[^a-z0-9.*()-]/gi, '*').replace(/\*+/g, '*').replace(/^\*|\*$/g, ''); // FIXED
 
 // 1. XML subfilename (most accurate — actual release name)
 if (meta?.subfilename) {
