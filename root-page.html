@@ -1,356 +1,734 @@
 <!DOCTYPE html>
-<html lang="en">
+
+<html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Munax | Peak Developer Hub</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #020202;
-            --card: #080808;
-            --border: #121212;
-            --accent: #ffffff;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>munax — VOID CINEMA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Fragment+Mono:ital@0;1&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: var(--bg);
-            color: var(--accent);
-            letter-spacing: -0.02em;
-        }
+/* ── THEMES ─────────────────────────────────────── */
+[data-theme=“dark”] {
+–bg:    #000000;
+–s0:    #050505;
+–s1:    #090909;
+–line:  #141414;
+–dim:   #222;
+–muted: #3a3a3a;
+–body:  #666;
+–text:  #999;
+–off:   #ccc;
+–black: #f0f0f0;
+–white: #f0f0f0;
+–gold:  #b8965a;
+–gold2: #d4aa72;
+–nav-bg: rgba(0,0,0,.93);
+–out-bg: #050505;
+}
+[data-theme=“light”] {
+–bg:    #f5f2ed;
+–s0:    #efebe4;
+–s1:    #e8e3db;
+–line:  #d8d2c8;
+–dim:   #bfb8ac;
+–muted: #9a9288;
+–body:  #6e6660;
+–text:  #3a3530;
+–off:   #3a3530;
+–black: #1a1612;
+–white: #1a1612;
+–gold:  #8a6a2e;
+–gold2: #b08840;
+–nav-bg: rgba(245,242,237,.93);
+–out-bg: #e8e3db;
+}
 
-        .mono { font-family: 'JetBrains Mono', monospace; }
+html { scroll-behavior: smooth; }
 
-        .bento-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1px;
-            background-color: var(--border);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-        }
+body {
+font-family: ‘Cormorant Garamond’, Georgia, serif;
+background: var(–bg);
+color: var(–body);
+overflow-x: hidden;
+-webkit-font-smoothing: antialiased;
+cursor: none;
+transition: background .7s cubic-bezier(.4,0,.2,1), color .7s;
+}
 
-        .bento-item {
-            background-color: var(--bg);
-            padding: 1.25rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            transition: background 0.2s ease;
-        }
+/* GRAIN */
+body::before {
+content: ‘’;
+position: fixed; inset: 0; pointer-events: none; z-index: 300;
+background-image: url(“data:image/svg+xml,%3Csvg viewBox=‘0 0 512 512’ xmlns=‘http://www.w3.org/2000/svg’%3E%3Cfilter id=‘n’%3E%3CfeTurbulence type=‘fractalNoise’ baseFrequency=‘0.75’ numOctaves=‘4’ stitchTiles=‘stitch’/%3E%3C/filter%3E%3Crect width=‘100%25’ height=‘100%25’ filter=‘url(%23n)’ opacity=‘1’/%3E%3C/svg%3E”);
+background-size: 200px; opacity: .04; mix-blend-mode: overlay;
+}
 
-        .bento-item:hover { background-color: #050505; }
+/* CURSOR */
+#cd {
+position: fixed; width: 6px; height: 6px;
+background: var(–gold); border-radius: 50%;
+pointer-events: none; z-index: 9999;
+transform: translate(-50%,-50%);
+transition: background .7s;
+}
+#cr {
+position: fixed; width: 32px; height: 32px;
+border: 1px solid rgba(184,150,90,.3); border-radius: 50%;
+pointer-events: none; z-index: 9998;
+transform: translate(-50%,-50%);
+transition: left .18s cubic-bezier(.25,.46,.45,.94),
+top  .18s cubic-bezier(.25,.46,.45,.94),
+width .4s, height .4s, border-color .4s;
+}
+#cr.h { width: 52px; height: 52px; border-color: rgba(184,150,90,.55); }
 
-        .glass-panel {
-            background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 100%);
-            border: 1px solid var(--border);
-        }
+/* ── NAV ─────────────────────────────────────────── */
+nav {
+position: fixed; top:0; left:0; right:0; z-index:100;
+display: flex; align-items: center; justify-content: space-between;
+padding: 0 4rem; height: 68px;
+border-bottom: 1px solid var(–line);
+background: var(–nav-bg);
+backdrop-filter: blur(20px);
+transition: background .7s, border-color .7s;
+}
+.nl {
+font-family: ‘Cormorant Garamond’, serif;
+font-style: italic; font-weight: 300;
+font-size: 1.1rem; letter-spacing: .2em;
+color: var(–white); text-transform: uppercase;
+transition: color .7s;
+}
+.nl b { font-style: normal; font-weight: 300; color: var(–gold); transition: color .7s; }
+.nlinks { display: flex; gap: 3rem; list-style: none; }
+.nlinks a {
+font-family: ‘Fragment Mono’, monospace; font-size: .56rem;
+letter-spacing: .25em; text-transform: uppercase;
+color: var(–muted); text-decoration: none;
+transition: color .4s;
+}
+.nlinks a:hover { color: var(–white); }
 
-        .pulse { animation: pulse-animation 3s infinite ease-in-out; }
+.nav-right { display: flex; align-items: center; gap: 1.5rem; }
 
-        @keyframes pulse-animation {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.9); }
-        }
+/* STATUS */
+.nstat {
+display: flex; align-items: center; gap: .7rem;
+font-family: ‘Fragment Mono’, monospace; font-size: .54rem;
+letter-spacing: .2em; text-transform: uppercase;
+}
+.nline { width: 16px; height: 1px; background: var(–muted); transition: background .8s; }
+.nline.on { background: var(–gold); }
+.ntxt { color: var(–muted); transition: color .8s; }
+.ntxt.on { color: var(–gold); }
 
-        input, select {
-            background: #000 !important;
-            border: 1px solid var(--border) !important;
-            color: white !important;
-            transition: all 0.2s ease;
-        }
-        input:focus, select:focus { border-color: #333 !important; outline: none; }
+/* ── THEME TOGGLE ────────────────────────────────── */
+.toggle-wrap {
+display: flex; align-items: center; gap: .8rem;
+cursor: none;
+}
+.toggle-lbl {
+font-family: ‘Fragment Mono’, monospace;
+font-size: .5rem; letter-spacing: .2em; text-transform: uppercase;
+color: var(–muted); transition: color .7s;
+user-select: none;
+}
+.toggle {
+position: relative; width: 40px; height: 22px;
+cursor: none;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-track {
+position: absolute; inset: 0;
+background: var(–dim);
+border: 1px solid var(–muted);
+border-radius: 11px;
+transition: background .5s, border-color .5s;
+cursor: none;
+}
+[data-theme=“light”] .toggle-track {
+background: var(–gold);
+border-color: var(–gold);
+}
+.toggle-thumb {
+position: absolute; top: 3px; left: 3px;
+width: 14px; height: 14px;
+background: var(–gold2);
+border-radius: 50%;
+transition: transform .45s cubic-bezier(.4,0,.2,1), background .5s;
+}
+[data-theme=“light”] .toggle-thumb {
+transform: translateX(18px);
+background: #fff;
+}
+.toggle-icon {
+position: absolute; font-size: 8px;
+top: 50%; transform: translateY(-50%);
+pointer-events: none; user-select: none;
+transition: opacity .4s;
+}
+.icon-moon { right: 6px; opacity: 1; }
+.icon-sun  { left: 6px;  opacity: 0; }
+[data-theme=“light”] .icon-moon { opacity: 0; }
+[data-theme=“light”] .icon-sun  { opacity: 1; }
 
-        pre::-webkit-scrollbar { width: 4px; height: 4px; }
-        pre::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 10px; }
+/* ── PAGE ────────────────────────────────────────── */
+.page { max-width: 1380px; margin: 0 auto; padding: 0 4rem; position: relative; z-index: 1; }
 
-        .label-text {
-            font-size: 9px;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: 0.3em;
-            color: #444;
-            font-style: italic;
-        }
+/* REVEAL */
+.r { opacity:0; transform:translateY(22px); transition:opacity .9s cubic-bezier(.25,.46,.45,.94), transform .9s cubic-bezier(.25,.46,.45,.94); }
+.r.v { opacity:1; transform:none; }
 
-        .endpoint-btn:hover .label-text { color: #888; }
-    </style>
+/* ── HERO ─────────────────────────────────────────── */
+.hero {
+min-height: 100vh; display: flex; flex-direction: column; justify-content: flex-end;
+padding: 68px 0 5.5rem; border-bottom: 1px solid var(–line);
+transition: border-color .7s;
+}
+.h-eye {
+font-family: ‘Fragment Mono’, monospace; font-size: .54rem;
+letter-spacing: .4em; text-transform: uppercase; color: var(–muted);
+display: flex; align-items: center; gap: 1.2rem; margin-bottom: 2.5rem;
+transition: color .7s;
+}
+.h-eye::before { content: ‘’; width: 22px; height: 1px; background: var(–gold); transition: background .7s; }
+.h-title {
+font-family: ‘Cormorant Garamond’, serif;
+font-weight: 300; font-style: italic;
+font-size: clamp(6rem, 14vw, 13rem);
+line-height: .84; letter-spacing: -.02em;
+color: var(–white); margin-bottom: 4.5rem;
+transition: color .7s;
+}
+.h-title .sup {
+display: block; font-size: .32em; font-style: normal;
+letter-spacing: .38em; text-transform: uppercase;
+color: var(–muted); margin-bottom: .5em;
+transition: color .7s;
+}
+.h-title .g { color: var(–gold2); transition: color .7s; }
+
+.h-bottom {
+display: grid; grid-template-columns: repeat(4,1fr);
+gap: 1px; background: var(–line); border: 1px solid var(–line);
+transition: background .7s, border-color .7s;
+}
+.hm {
+background: var(–bg); padding: 2rem 1.8rem;
+transition: background .7s;
+}
+.hm-val {
+font-family: ‘Cormorant Garamond’, serif; font-style: italic; font-weight: 300;
+font-size: 3.2rem; line-height: 1; color: var(–white);
+display: block; margin-bottom: .5rem; transition: color .7s;
+}
+.hm-lbl {
+font-family: ‘Fragment Mono’, monospace; font-size: .5rem;
+letter-spacing: .28em; text-transform: uppercase; color: var(–muted);
+transition: color .7s;
+}
+
+/* ── DIVIDER ─────────────────────────────────────── */
+.sdiv { display:flex; align-items:center; gap:1.5rem; padding:5rem 0 3.5rem; }
+.sdiv-lbl {
+font-family:‘Fragment Mono’,monospace; font-size:.52rem;
+letter-spacing:.4em; text-transform:uppercase; color:var(–muted);
+white-space:nowrap; flex-shrink:0; transition:color .7s;
+}
+.sdiv-line { flex:1; height:1px; background:var(–line); transition:background .7s; }
+.sdiv-num { font-family:‘Fragment Mono’,monospace; font-size:.5rem; color:var(–dim); flex-shrink:0; transition:color .7s; }
+
+/* ── MONITOR ─────────────────────────────────────── */
+.mon-grid {
+display:grid; grid-template-columns:repeat(5,1fr);
+gap:1px; background:var(–line); border:1px solid var(–line);
+margin-bottom:1px; transition:background .7s, border-color .7s;
+}
+.mc {
+background:var(–bg); padding:2.5rem 1.8rem;
+position:relative; overflow:hidden;
+transition:background .5s;
+}
+.mc:hover { background:var(–s0); }
+.mc::after {
+content:’’; position:absolute; bottom:0; left:0; right:0; height:1px;
+background:var(–gold); opacity:0; transition:opacity .5s;
+}
+.mc:hover::after { opacity:1; }
+.mc-val {
+font-family:‘Cormorant Garamond’,serif; font-style:italic; font-weight:300;
+font-size:4rem; line-height:1; color:var(–white); display:block; margin-bottom:.6rem;
+transition:color .5s;
+}
+.mc:hover .mc-val { color:var(–gold2); }
+.mc-lbl {
+font-family:‘Fragment Mono’,monospace; font-size:.5rem;
+letter-spacing:.28em; text-transform:uppercase; color:var(–muted);
+transition:color .7s;
+}
+
+.mon-quota {
+background:var(–bg); border:1px solid var(–line); border-top:none;
+padding:1.8rem 2.2rem; margin-bottom:1px;
+transition:background .7s, border-color .7s;
+}
+.quota-head { display:flex; justify-content:space-between; margin-bottom:1rem; }
+.quota-lbl { font-family:‘Fragment Mono’,monospace; font-size:.5rem; letter-spacing:.3em; text-transform:uppercase; color:var(–muted); transition:color .7s; }
+.quota-val { font-family:‘Fragment Mono’,monospace; font-size:.54rem; color:var(–body); transition:color .7s; }
+.qtrack { width:100%; height:1px; background:var(–dim); transition:background .7s; }
+.qfill  { height:100%; background:var(–gold); box-shadow:0 0 8px rgba(184,150,90,.35); transition:width 2s cubic-bezier(.25,.46,.45,.94), background .7s; }
+
+.mon-sess {
+background:var(–bg); border:1px solid var(–line); border-top:none;
+padding:1.4rem 2.2rem; display:flex; align-items:center; justify-content:space-between;
+transition:background .7s, border-color .7s;
+}
+.sb {
+font-family:‘Fragment Mono’,monospace; font-size:.54rem;
+letter-spacing:.18em; text-transform:uppercase;
+padding:.35rem 1rem; border:1px solid var(–muted); color:var(–muted);
+transition:all .6s;
+}
+.sb.ok  { border-color:var(–gold); color:var(–gold); }
+.sb.bad { border-color:#c06060; color:#c06060; }
+.sp { font-family:‘Fragment Mono’,monospace; font-size:.52rem; color:var(–muted); transition:color .7s; }
+
+/* ── WORKSPACE ───────────────────────────────────── */
+.work {
+display:grid; grid-template-columns:1fr 1fr;
+gap:1px; background:var(–line); border:1px solid var(–line);
+transition:background .7s, border-color .7s;
+}
+.ep-panel, .con-panel {
+background:var(–bg); padding:2.5rem; transition:background .7s;
+}
+
+.ep-hdr {
+display:grid; grid-template-columns:70px 1fr 100px;
+padding:.8rem 0 .8rem .5rem; border-bottom:1px solid var(–line); margin-bottom:.5rem;
+transition:border-color .7s;
+}
+.ep-hdr span {
+font-family:‘Fragment Mono’,monospace; font-size:.48rem;
+letter-spacing:.35em; text-transform:uppercase; color:var(–dim); transition:color .7s;
+}
+.ep-hdr span:last-child { text-align:right; }
+
+.epr {
+display:grid; grid-template-columns:70px 1fr 100px; align-items:center;
+padding:1.25rem .5rem; border-bottom:1px solid var(–line);
+cursor:none; position:relative; overflow:hidden; transition:background .4s;
+}
+.epr:last-child { border-bottom:none; }
+.epr:hover { background:var(–s0); }
+.epr::before {
+content:’’; position:absolute; left:0; top:0; bottom:0; width:1px;
+background:var(–gold); opacity:0; transition:opacity .4s;
+}
+.epr:hover::before { opacity:1; }
+.em { font-family:‘Fragment Mono’,monospace; font-size:.5rem; letter-spacing:.1em; color:var(–gold); padding-left:.5rem; transition:color .7s; }
+.ep { font-family:‘Fragment Mono’,monospace; font-size:.68rem; color:var(–text); transition:color .7s; }
+.ep .p { color:var(–white); transition:color .7s; }
+.ep .q { color:var(–muted); transition:color .7s; }
+.ea { text-align:right; font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.28em; text-transform:uppercase; color:var(–dim); transition:color .4s; }
+.epr:hover .ea { color:var(–gold); }
+
+.con-head {
+display:flex; align-items:center; justify-content:space-between;
+margin-bottom:1.8rem; padding-bottom:1.4rem; border-bottom:1px solid var(–line);
+transition:border-color .7s;
+}
+.con-lbl { font-family:‘Fragment Mono’,monospace; font-size:.52rem; letter-spacing:.3em; text-transform:uppercase; color:var(–muted); transition:color .7s; }
+.con-time { font-family:‘Fragment Mono’,monospace; font-size:.52rem; color:var(–dim); transition:color .7s; }
+.con-row { display:flex; gap:1px; margin-bottom:1.4rem; }
+.con-input {
+flex:1; background:var(–s0); border:1px solid var(–line); border-right:none;
+color:var(–white); font-family:‘Fragment Mono’,monospace; font-size:.66rem;
+padding:.8rem 1.1rem; outline:none; transition:border-color .4s, background .7s, color .7s;
+}
+.con-input:focus { border-color:var(–gold); }
+.con-btn {
+background:var(–gold); color:var(–bg); border:none;
+font-family:‘Fragment Mono’,monospace; font-size:.5rem; font-weight:500;
+letter-spacing:.28em; text-transform:uppercase;
+padding:0 1.5rem; cursor:none; transition:background .35s, color .7s;
+}
+.con-btn:hover { background:var(–gold2); }
+.con-out {
+background:var(–out-bg); border:1px solid var(–line);
+padding:1.3rem; height:360px; overflow-y:auto; position:relative;
+transition:background .7s, border-color .7s;
+}
+.con-out::-webkit-scrollbar { width:1px; }
+.con-out::-webkit-scrollbar-thumb { background:var(–dim); }
+.con-pre {
+font-family:‘Fragment Mono’,monospace; font-size:.62rem;
+line-height:2; color:var(–muted); white-space:pre-wrap; word-break:break-all;
+transition:color .7s;
+}
+.otag { position:absolute; top:.8rem; right:.8rem; font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.18em; text-transform:uppercase; color:var(–dim); }
+.otag.ok { color:var(–gold); }
+.otag.er { color:#c06060; }
+
+/* ── CONTACT ─────────────────────────────────────── */
+.ct-grid {
+display:grid; grid-template-columns:1fr 1fr;
+gap:1px; background:var(–line); border:1px solid var(–line);
+transition:background .7s, border-color .7s;
+}
+.ct-l,.ct-r { background:var(–bg); padding:4rem; transition:background .7s; }
+
+.ct-over {
+font-family:‘Fragment Mono’,monospace; font-size:.52rem;
+letter-spacing:.4em; text-transform:uppercase; color:var(–gold);
+display:flex; align-items:center; gap:1rem; margin-bottom:2rem; transition:color .7s;
+}
+.ct-over::before { content:’’; width:18px; height:1px; background:var(–gold); transition:background .7s; }
+.ct-title {
+font-family:‘Cormorant Garamond’,serif; font-weight:300; font-style:italic;
+font-size:clamp(3.5rem,7vw,6rem); line-height:.86; letter-spacing:-.01em;
+color:var(–white); margin-bottom:2rem; transition:color .7s;
+}
+.ct-title .a { color:var(–gold2); transition:color .7s; }
+.ct-body { font-family:‘Cormorant Garamond’,serif; font-weight:300; font-size:1.05rem; line-height:1.85; color:var(–body); max-width:360px; margin-bottom:2.5rem; transition:color .7s; }
+
+.ig { display:flex; align-items:center; gap:1.5rem; padding:1.4rem 1.8rem; border:1px solid var(–line); text-decoration:none; background:var(–s0); transition:border-color .5s, padding-left .4s, background .7s; }
+.ig:hover { border-color:var(–gold); padding-left:2.2rem; background:var(–bg); }
+.ig-ic { width:38px; height:38px; border:1px solid var(–muted); display:flex; align-items:center; justify-content:center; color:var(–muted); flex-shrink:0; transition:border-color .5s, color .5s; }
+.ig:hover .ig-ic { border-color:var(–gold); color:var(–gold); }
+.ig-handle { font-family:‘Cormorant Garamond’,serif; font-style:italic; font-weight:300; font-size:1.35rem; color:var(–white); transition:color .7s; }
+.ig-sub { font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.22em; text-transform:uppercase; color:var(–muted); margin-top:.2rem; transition:color .7s; }
+.ig-ar { margin-left:auto; color:var(–dim); transition:color .4s, transform .4s; }
+.ig:hover .ig-ar { color:var(–gold); transform:translateX(5px); }
+
+.spec-row { display:flex; justify-content:space-between; align-items:baseline; padding:1rem 0; border-bottom:1px solid var(–line); transition:border-color .7s; }
+.spec-row:first-child { border-top:1px solid var(–line); }
+.sk { font-family:‘Fragment Mono’,monospace; font-size:.52rem; letter-spacing:.22em; text-transform:uppercase; color:var(–muted); transition:color .7s; }
+.sv { font-family:‘Cormorant Garamond’,serif; font-size:1rem; font-style:italic; font-weight:300; color:var(–text); transition:color .7s; }
+.sv.go { color:var(–gold2); }
+
+.vstamp { display:inline-flex; align-items:center; gap:1rem; font-family:‘Fragment Mono’,monospace; font-size:.52rem; letter-spacing:.25em; text-transform:uppercase; color:var(–muted); padding:.9rem 1.4rem; border:1px solid var(–line); margin-top:1.8rem; transition:border-color .7s, color .7s; }
+.vstamp span { color:var(–gold); transition:color .7s; }
+
+footer { padding:2.5rem 0; margin-top:1px; border-top:1px solid var(–line); display:flex; align-items:center; justify-content:space-between; transition:border-color .7s; }
+.fsig { font-family:‘Cormorant Garamond’,serif; font-style:italic; font-weight:300; font-size:1.5rem; letter-spacing:.08em; color:var(–dim); transition:color .7s; }
+.fcopy { font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.28em; text-transform:uppercase; color:var(–dim); transition:color .7s; }
+
+@media(max-width:900px){
+.page{padding:0 1.4rem;} nav{padding:0 1.4rem;} .nlinks{display:none;}
+.h-title{font-size:5.5rem;} .h-bottom{grid-template-columns:1fr 1fr;}
+.mon-grid{grid-template-columns:repeat(3,1fr);} .work{grid-template-columns:1fr;}
+.ct-grid{grid-template-columns:1fr;} .epr{grid-template-columns:60px 1fr;}
+.ea{display:none;} .ep-hdr{grid-template-columns:60px 1fr;} .ep-hdr span:last-child{display:none;}
+}
+</style>
+
 </head>
-<body class="antialiased selection:bg-white selection:text-black">
+<body>
+<div id="cd"></div>
+<div id="cr"></div>
 
-    <nav class="border-b border-[#121212] py-5 px-8 bg-[#020202]/80 backdrop-blur-xl fixed top-0 w-full z-50">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
-            <div class="flex items-center gap-10">
-                <span class="text-lg font-black tracking-tighter italic uppercase select-none">munax</span>
-                <div class="hidden md:flex gap-8 label-text">
-                    <a href="#monitor" class="hover:text-white transition-colors">Core_Stats</a>
-                    <a href="#docs" class="hover:text-white transition-colors">Endpoints</a>
-                </div>
-            </div>
-            <div class="flex items-center gap-3 bg-[#111] px-3 py-1.5 rounded-full border border-[#222]">
-                <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse"></div>
-                <span class="mono text-[9px] text-emerald-500/90 uppercase tracking-[0.1em] font-bold">Node_Koyeb_Live</span>
-            </div>
+<nav>
+  <div class="nl">void<b>.</b>cinema</div>
+  <ul class="nlinks">
+    <li><a href="#monitor">Monitor</a></li>
+    <li><a href="#api">Interface</a></li>
+    <li><a href="#contact">Contact</a></li>
+    <li><a href="https://github.com/munax07/Opensub-Api" target="_blank">Source</a></li>
+  </ul>
+  <div class="nav-right">
+    <div class="nstat">
+      <div class="nline" id="nl2"></div>
+      <span class="ntxt" id="nt">Connecting</span>
+    </div>
+    <label class="toggle-wrap" title="Toggle theme">
+      <span class="toggle-lbl" id="theme-lbl">Dark</span>
+      <div class="toggle" onclick="toggleTheme()">
+        <div class="toggle-track">
+          <span class="toggle-icon icon-moon">☽</span>
+          <span class="toggle-icon icon-sun">☀</span>
+          <div class="toggle-thumb"></div>
         </div>
-    </nav>
+      </div>
+    </label>
+  </div>
+</nav>
 
-    <main class="max-w-7xl mx-auto px-8 pt-32 pb-20">
-        
-        <!-- Live Status Section -->
-        <section id="monitor" class="mb-20">
-            <div class="flex items-end justify-between mb-8">
-                <div>
-                    <h3 class="label-text mb-2">Realtime_System_Data</h3>
-                    <h2 class="text-4xl font-light tracking-tighter">System Pulse</h2>
-                </div>
-                <div id="live-clock" class="mono text-lg text-neutral-600 tabular-nums font-light">00:00:00</div>
-            </div>
+<div class="page">
 
-            <div class="bento-grid">
-                <div class="bento-item min-h-[120px]">
-                    <span class="label-text">Uptime</span>
-                    <span class="text-3xl mono mt-4 tracking-tighter" id="uptime">0<span class="text-[10px] text-neutral-600 ml-1 italic font-normal tracking-normal">H</span></span>
-                </div>
-                <div class="bento-item">
-                    <span class="label-text">Search_Cache</span>
-                    <span class="text-3xl mono mt-4 tracking-tighter" id="search-cache">0</span>
-                </div>
-                <div class="bento-item">
-                    <span class="label-text">DL_Cache</span>
-                    <span class="text-3xl mono mt-4 tracking-tighter" id="download-cache">0<span class="text-[10px] text-neutral-600 ml-1 italic font-normal tracking-normal">FILES</span></span>
-                </div>
-                <div class="bento-item">
-                    <span class="label-text">Heap_Memory</span>
-                    <span class="text-3xl mono mt-4 tracking-tighter" id="heap">0<span class="text-[10px] text-neutral-600 ml-1 italic font-normal tracking-normal">MB</span></span>
-                </div>
-                <div class="bento-item border-t border-neutral-900">
-                    <span class="label-text">Active_Cookies</span>
-                    <span class="text-3xl mono mt-4 tracking-tighter" id="cookies">0</span>
-                </div>
-                <div class="bento-item border-t border-neutral-900 lg:col-span-3">
-                    <div class="flex justify-between items-center">
-                        <span class="label-text">API_Bandwidth_Quota</span>
-                        <span class="mono text-[10px] text-neutral-500" id="quota">SYNCING...</span>
-                    </div>
-                    <div class="w-full h-[2px] bg-neutral-900 mt-8 rounded-full overflow-hidden">
-                        <div class="h-full bg-white transition-all duration-1000 ease-out" id="quota-bar" style="width:0%"></div>
-                    </div>
-                </div>
-            </div>
-        </section>
+  <section class="hero">
+    <div class="h-eye r">OpenSubtitles Proxy Infrastructure &mdash; v13.0</div>
+    <h1 class="h-title r" style="transition-delay:.1s">
+      <span class="sup">Void</span>
+      Cin<span class="g">e</span>ma
+    </h1>
+    <div class="h-bottom r" style="transition-delay:.22s">
+      <div class="hm"><span class="hm-val" id="hm1">--</span><span class="hm-lbl">Hours Live</span></div>
+      <div class="hm" style="border-left:1px solid var(--line)"><span class="hm-val" id="hm2">--</span><span class="hm-lbl">Cached</span></div>
+      <div class="hm" style="border-left:1px solid var(--line)"><span class="hm-val" id="hm3">--</span><span class="hm-lbl">Heap MB</span></div>
+      <div class="hm" style="border-left:1px solid var(--line)"><span class="hm-val" id="hm4">--</span><span class="hm-lbl">Proxies</span></div>
+    </div>
+  </section>
 
-        <!-- API Core -->
-        <div class="grid lg:grid-cols-12 gap-16" id="docs">
-            <div class="lg:col-span-7">
-                <h3 class="label-text mb-8">Documentation_Schema</h3>
-                
-                <div class="space-y-12">
-                    <div class="glass-panel p-6 rounded-xl">
-                        <h4 class="text-[11px] uppercase font-bold text-neutral-500 mb-4 tracking-widest">Base_Resource_Path</h4>
-                        <div class="flex items-center justify-between bg-black border border-[#1a1a1a] p-3 rounded-lg group">
-                            <code class="mono text-[11px] text-neutral-400" id="base-url">https://powerful-sib-mujaiwow-0209e698.koyeb.app</code>
-                            <button onclick="copyUrl()" class="text-[9px] font-black uppercase hover:text-white text-neutral-600 transition-colors px-2">Copy</button>
-                        </div>
-                    </div>
+  <section id="monitor">
+    <div class="sdiv r"><div class="sdiv-lbl">System Monitor</div><div class="sdiv-line"></div><div class="sdiv-num">01</div></div>
+    <div class="mon-grid r" style="transition-delay:.08s">
+      <div class="mc"><span class="mc-val" id="m1">--</span><span class="mc-lbl">Uptime hrs</span></div>
+      <div class="mc"><span class="mc-val" id="m2">--</span><span class="mc-lbl">Search Cache</span></div>
+      <div class="mc"><span class="mc-val" id="m3">--</span><span class="mc-lbl">Meta Cache</span></div>
+      <div class="mc"><span class="mc-val" id="m4">--</span><span class="mc-lbl">DL Buffer</span></div>
+      <div class="mc"><span class="mc-val" id="m5" style="font-size:2.4rem">--</span><span class="mc-lbl">Heap Used</span></div>
+    </div>
+    <div class="mon-quota r" style="transition-delay:.14s">
+      <div class="quota-head">
+        <span class="quota-lbl">API Quota Utilisation</span>
+        <span class="quota-val" id="mq">No credentials configured</span>
+      </div>
+      <div class="qtrack"><div class="qfill" id="mqb" style="width:0%"></div></div>
+    </div>
+    <div class="mon-sess r" style="transition-delay:.2s">
+      <span class="sb" id="ms">Checking session...</span>
+      <span class="sp" id="mp">proxy: --</span>
+    </div>
+  </section>
 
-                    <div class="space-y-1 border-t border-[#121212]">
-                        <!-- Search Basic -->
-                        <div class="flex items-center justify-between py-4 border-b border-[#121212] group cursor-pointer endpoint-btn" onclick="setPath('/search?q=Inception')">
-                            <div class="flex items-center gap-6">
-                                <span class="mono text-[9px] text-sky-400 font-bold bg-sky-400/5 px-2 py-0.5 rounded">GET</span>
-                                <span class="mono text-[13px] tracking-tighter text-neutral-300">/search?q=Inception</span>
-                            </div>
-                            <span class="label-text opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">Invoke</span>
-                        </div>
-                        
-                        <!-- Search Advanced -->
-                        <div class="flex items-center justify-between py-4 border-b border-[#121212] group cursor-pointer endpoint-btn" onclick="setPath('/search?q=Avatar&lang=ml&type=movie')">
-                            <div class="flex items-center gap-6">
-                                <span class="mono text-[9px] text-sky-400 font-bold bg-sky-400/5 px-2 py-0.5 rounded">GET</span>
-                                <span class="mono text-[13px] tracking-tighter text-neutral-300">/search?q=Avatar&lang=ml&type=movie</span>
-                            </div>
-                            <span class="label-text opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">Invoke</span>
-                        </div>
-
-                        <!-- Languages -->
-                        <div class="flex items-center justify-between py-4 border-b border-[#121212] group cursor-pointer endpoint-btn" onclick="setPath('/languages?q=Inception')">
-                            <div class="flex items-center gap-6">
-                                <span class="mono text-[9px] text-purple-400 font-bold bg-purple-400/5 px-2 py-0.5 rounded">GET</span>
-                                <span class="mono text-[13px] tracking-tighter text-neutral-300">/languages?q=Inception</span>
-                            </div>
-                            <span class="label-text opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">Invoke</span>
-                        </div>
-
-                        <!-- Download -->
-                        <div class="flex items-center justify-between py-4 border-b border-[#121212] group cursor-pointer endpoint-btn" onclick="setPath('/download?id=3962439')">
-                            <div class="flex items-center gap-6">
-                                <span class="mono text-[9px] text-rose-400 font-bold bg-rose-400/5 px-2 py-0.5 rounded">GET</span>
-                                <span class="mono text-[13px] tracking-tighter text-neutral-300">/download?id=3962439</span>
-                            </div>
-                            <span class="label-text opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">Invoke</span>
-                        </div>
-
-                        <!-- Stats -->
-                        <div class="flex items-center justify-between py-4 border-b border-[#121212] group cursor-pointer endpoint-btn" onclick="setPath('/stats')">
-                            <div class="flex items-center gap-6">
-                                <span class="mono text-[9px] text-amber-400 font-bold bg-amber-400/5 px-2 py-0.5 rounded">GET</span>
-                                <span class="mono text-[13px] tracking-tighter text-neutral-300">/stats</span>
-                            </div>
-                            <span class="label-text opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">Invoke</span>
-                        </div>
-
-                        <!-- Health -->
-                        <div class="flex items-center justify-between py-4 border-b border-[#121212] group cursor-pointer endpoint-btn" onclick="setPath('/health')">
-                            <div class="flex items-center gap-6">
-                                <span class="mono text-[9px] text-emerald-400 font-bold bg-emerald-400/5 px-2 py-0.5 rounded">GET</span>
-                                <span class="mono text-[13px] tracking-tighter text-neutral-300">/health</span>
-                            </div>
-                            <span class="label-text opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">Invoke</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Terminal -->
-            <div class="lg:col-span-5">
-                <h3 class="label-text mb-8">Virtual_Terminal</h3>
-                <div class="bg-black border border-[#121212] rounded-xl overflow-hidden shadow-2xl sticky top-28">
-                    <div class="px-5 py-3 border-b border-[#121212] flex justify-between items-center bg-[#050505]">
-                        <div class="flex gap-1.5">
-                            <div class="w-2 h-2 rounded-full bg-[#222]"></div>
-                            <div class="w-2 h-2 rounded-full bg-[#222]"></div>
-                        </div>
-                        <span class="mono text-[9px] text-neutral-600 uppercase">Input_Stream</span>
-                    </div>
-                    <div class="p-6 space-y-6">
-                        <div class="flex gap-2">
-                            <select id="method" class="text-[10px] font-bold uppercase px-3 py-2.5 rounded-md bg-black">
-                                <option>GET</option>
-                                <option>POST</option>
-                            </select>
-                            <input id="path" type="text" placeholder="/search" value="/search?q=Inception" class="flex-1 text-[11px] px-3 py-2.5 rounded-md mono bg-black">
-                        </div>
-                        
-                        <button onclick="runRequest()" id="exec-btn" class="w-full bg-white text-black py-3.5 rounded-md text-[10px] font-black uppercase tracking-[0.2em] hover:bg-neutral-200 transition-all active:scale-[0.98]">
-                            Execute_Payload
-                        </button>
-
-                        <div class="space-y-3">
-                            <div class="flex justify-between items-center label-text">
-                                <span>Output_Buffer</span>
-                                <span id="status" class="mono lowercase font-normal italic">Ready</span>
-                            </div>
-                            <div class="bg-[#030303] border border-[#111] rounded-lg p-5 h-72 overflow-auto relative">
-                                <pre id="output" class="text-[11px] mono text-neutral-600 leading-relaxed whitespace-pre-wrap font-medium">// Waiting for request invocation...</pre>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+  <section id="api">
+    <div class="sdiv r"><div class="sdiv-lbl">API Interface</div><div class="sdiv-line"></div><div class="sdiv-num">02</div></div>
+    <div class="work r" style="transition-delay:.08s">
+      <div class="ep-panel">
+        <div class="ep-hdr">
+          <span>Method</span><span>Endpoint</span><span style="text-align:right">Action</span>
         </div>
+        <div class="epr" onclick="sp('/search?q=Inception')">
+          <span class="em">GET</span><span class="ep">/<span class="p">search</span><span class="q">?q=Inception</span></span><span class="ea">Test &rarr;</span>
+        </div>
+        <div class="epr" onclick="sp('/search?q=Avatar&lang=ml&type=movie')">
+          <span class="em">GET</span><span class="ep">/<span class="p">search</span><span class="q">?q=Avatar&amp;lang=ml</span></span><span class="ea">Test &rarr;</span>
+        </div>
+        <div class="epr" onclick="sp('/search?q=fight+club&lang=en')">
+          <span class="em">GET</span><span class="ep">/<span class="p">search</span><span class="q">?q=fight+club&amp;lang=en</span></span><span class="ea">Test &rarr;</span>
+        </div>
+        <div class="epr" onclick="sp('/languages?q=Inception')">
+          <span class="em">GET</span><span class="ep">/<span class="p">languages</span><span class="q">?q=Inception</span></span><span class="ea">Test &rarr;</span>
+        </div>
+        <div class="epr" onclick="sp('/download?id=3962439')">
+          <span class="em">GET</span><span class="ep">/<span class="p">download</span><span class="q">?id=3962439</span></span><span class="ea">Test &rarr;</span>
+        </div>
+        <div class="epr" onclick="sp('/stats')">
+          <span class="em">GET</span><span class="ep">/<span class="p">stats</span></span><span class="ea">Test &rarr;</span>
+        </div>
+        <div class="epr" onclick="sp('/health')">
+          <span class="em">GET</span><span class="ep">/<span class="p">health</span></span><span class="ea">Test &rarr;</span>
+        </div>
+      </div>
+      <div class="con-panel">
+        <div class="con-head">
+          <span class="con-lbl">Execution Console</span>
+          <span class="con-time" id="ct">--:--:--</span>
+        </div>
+        <div class="con-row">
+          <input class="con-input" id="ci" value="/search?q=Inception" spellcheck="false" autocomplete="off">
+          <button class="con-btn" id="cb" onclick="run()">Execute</button>
+        </div>
+        <div class="con-out">
+          <span class="otag" id="cs">standby</span>
+          <pre class="con-pre" id="co">// Select an endpoint or type a path.
+// Hit Execute to call your API.</pre>
+        </div>
+      </div>
+    </div>
+  </section>
 
-        <!-- Footer -->
-        <footer class="mt-40 pt-10 border-t border-[#121212] flex flex-col md:flex-row justify-between items-center text-neutral-800">
-            <div class="label-text !text-[#222] italic text-sm">munax</div>
-            <div class="mono text-[9px] uppercase tracking-widest text-[#333]">Peak_Interface_v2.5.0</div>
-            <div class="text-[9px] uppercase tracking-tighter text-[#333]">© 2024 • POWERED_BY_KOYEB</div>
-        </footer>
-    </main>
+  <section id="contact">
+    <div class="sdiv r"><div class="sdiv-lbl">Contact</div><div class="sdiv-line"></div><div class="sdiv-num">03</div></div>
+    <div class="ct-grid r" style="transition-delay:.08s">
+      <div class="ct-l">
+        <div class="ct-over">Access &amp; Inquiry</div>
+        <h2 class="ct-title">Stay<br>in<br><span class="a">touch.</span></h2>
+        <p class="ct-body">Open for collaboration, integration support, and custom developer inquiries. Guaranteed response via Instagram.</p>
+        <a href="https://instagram.com/munavi.r_" target="_blank" class="ig">
+          <div class="ig-ic">
+            <svg width="17" height="17" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>
+          </div>
+          <div>
+            <div class="ig-handle">munavi.r_</div>
+            <div class="ig-sub">Instagram</div>
+          </div>
+          <div class="ig-ar">&rarr;</div>
+        </a>
+      </div>
+      <div class="ct-r">
+        <div class="spec-row"><span class="sk">Architecture</span><span class="sv go">munax</span></div>
+        <div class="spec-row"><span class="sk">Build</span><span class="sv">Ultra Peak v13.0</span></div>
+        <div class="spec-row"><span class="sk">Search</span><span class="sv">simpleXML — Unlimited</span></div>
+        <div class="spec-row"><span class="sk">Download</span><span class="sv">API + Scraper fallback</span></div>
+        <div class="spec-row"><span class="sk">Language Priority</span><span class="sv go">Malayalam first</span></div>
+        <div class="spec-row"><span class="sk">Auto-title</span><span class="sv">Release metadata cache</span></div>
+        <div class="spec-row"><span class="sk">Proxy Pool</span><span class="sv">Rotation — up to 20</span></div>
+        <div class="spec-row"><span class="sk">Platform</span><span class="sv">Koyeb — auto-ping</span></div>
+        <div class="vstamp">Stable Release <span>v13.0</span></div>
+      </div>
+    </div>
+  </section>
 
-    <script>
-        const BASE_URL = 'https://powerful-sib-mujaiwow-0209e698.koyeb.app';
+  <footer class="r">
+    <div class="fsig">munax</div>
+    <div style="text-align:right">
+      <div class="fcopy">Void Cinema &mdash; 2026</div>
+      <div class="fcopy" style="margin-top:.4rem;color:var(--gold)">architecture by munax 🩷</div>
+    </div>
+  </footer>
+</div>
 
-        function updateClock() {
-            const now = new Date();
-            document.getElementById('live-clock').innerText = now.toTimeString().split(' ')[0];
-        }
-        setInterval(updateClock, 1000);
-        updateClock();
+<script>
+const BASE = 'https://powerful-sib-mujaiwow-0209e698.koyeb.app';
 
-        async function refreshStats() {
-            try {
-                const res = await fetch(`${BASE_URL}/stats`);
-                const data = await res.json();
-                if (!data.success) return;
+// ── THEME TOGGLE ─────────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const isDark = html.getAttribute('data-theme') === 'dark';
+  html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  document.getElementById('theme-lbl').textContent = isDark ? 'Light' : 'Dark';
+  localStorage.setItem('void-theme', isDark ? 'light' : 'dark');
+}
 
-                const uptimeVal = data.uptimeFormatted ? data.uptimeFormatted.split(':')[0] : '0';
-                document.getElementById('uptime').innerHTML = `${uptimeVal}<span class="text-[10px] text-neutral-600 ml-1 italic">H</span>`;
-                document.getElementById('search-cache').innerText = data.cache?.search?.keys || 0;
-                document.getElementById('download-cache').innerHTML = `${data.cache?.download?.keys || 0}<span class="text-[10px] text-neutral-600 ml-1">F</span>`;
-                
-                const heap = data.memory?.heapUsed ? parseFloat(data.memory.heapUsed).toFixed(1) : '0';
-                document.getElementById('heap').innerHTML = `${heap}<span class="text-[10px] text-neutral-600 ml-1">MB</span>`;
-                document.getElementById('cookies').innerText = data.cookieCount || 0;
+// restore saved theme
+const saved = localStorage.getItem('void-theme');
+if (saved) {
+  document.documentElement.setAttribute('data-theme', saved);
+  document.getElementById('theme-lbl').textContent = saved === 'light' ? 'Light' : 'Dark';
+}
 
-                const quota = 84; 
-                document.getElementById('quota').innerText = `${quota}%_AVAILABLE`;
-                document.getElementById('quota-bar').style.width = `${quota}%`;
-            } catch (e) {
-                console.log('Stats stream sync failed');
-            }
-        }
-        
-        refreshStats();
-        setInterval(refreshStats, 8000);
+// ── CURSOR ────────────────────────────────────────────────────────────
+const cd = document.getElementById('cd');
+const cr = document.getElementById('cr');
+document.addEventListener('mousemove', e => {
+  cd.style.left = e.clientX+'px'; cd.style.top = e.clientY+'px';
+  cr.style.left = e.clientX+'px'; cr.style.top = e.clientY+'px';
+});
+document.querySelectorAll('a,button,.epr,input,.toggle-wrap').forEach(el => {
+  el.addEventListener('mouseenter', () => cr.classList.add('h'));
+  el.addEventListener('mouseleave', () => cr.classList.remove('h'));
+});
 
-        async function runRequest() {
-            const btn = document.getElementById('exec-btn');
-            const out = document.getElementById('output');
-            const stat = document.getElementById('status');
-            const path = document.getElementById('path').value;
-            const method = document.getElementById('method').value;
+// ── REVEAL ────────────────────────────────────────────────────────────
+const obs = new IntersectionObserver(es => es.forEach(e => {
+  if (e.isIntersecting) e.target.classList.add('v');
+}), { threshold: 0.07 });
+document.querySelectorAll('.r').forEach(el => obs.observe(el));
 
-            btn.innerText = "Processing...";
-            out.innerText = "// Requesting stream...";
-            
-            try {
-                const start = performance.now();
-                const res = await fetch(`${BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`, { method });
-                const time = Math.round(performance.now() - start);
-                
-                // Handle download endpoint differently if it's a file stream
-                if (path.includes('/download')) {
-                    stat.innerText = `200 OK (Stream_Init)`;
-                    out.innerText = "// Binary stream detected.\n// Download initialized via browser context.";
-                    window.open(`${BASE_URL}${path}`, '_blank');
-                    return;
-                }
+// ── CLOCK ─────────────────────────────────────────────────────────────
+setInterval(() => document.getElementById('ct').innerText = new Date().toTimeString().slice(0,8), 1000);
 
-                const data = await res.json();
-                stat.innerText = `${res.status}_${res.statusText} (${time}ms)`;
-                stat.className = "mono italic text-emerald-500 font-bold";
-                out.innerText = JSON.stringify(data, null, 2);
-                out.className = "text-[11px] mono text-neutral-400 leading-relaxed";
-            } catch (e) {
-                stat.innerText = "Error_Stream_Interrupted";
-                stat.className = "mono italic text-red-500";
-                out.innerText = `// Connection Error\n${e.message}`;
-            } finally {
-                btn.innerText = "Execute_Payload";
-            }
-        }
+// ── COUNT UP ──────────────────────────────────────────────────────────
+function cu(el, target, dur=1200) {
+  const s = performance.now();
+  (function step(n) {
+    const p = Math.min((n-s)/dur,1), e = 1-Math.pow(1-p,3);
+    el.innerText = Math.round(target*e);
+    if (p<1) requestAnimationFrame(step);
+  })(s);
+}
 
-        function setPath(p) {
-            document.getElementById('path').value = p;
-            const terminal = document.getElementById('path');
-            terminal.focus();
-            // Subtle flash effect on input
-            terminal.style.borderColor = "#fff";
-            setTimeout(() => terminal.style.borderColor = "#121212", 300);
-        }
+// ── STATS ─────────────────────────────────────────────────────────────
+async function stats() {
+  try {
+    const d = await (await fetch(BASE+'/stats')).json();
+    if (!d.success) throw 0;
+    const hrs  = Math.floor((d.uptime||0)/3600);
+    const heap = parseFloat((d.memory?.heapUsed||'0').replace(/[^0-9.]/g,''));
+    const sc   = d.cache?.search?.keys  || 0;
+    const mc   = d.cache?.meta?.keys    || 0;
+    const dl   = d.cache?.download?.keys|| 0;
+    const pc   = typeof d.proxy==='object' ? (d.proxy.count||'--') : '--';
 
-        function copyUrl() {
-            navigator.clipboard.writeText(BASE_URL);
-            const b = document.querySelector('[onclick="copyUrl()"]');
-            b.innerText = "COPIED";
-            setTimeout(() => b.innerText = "COPY", 2000);
-        }
-    </script>
+    cu(document.getElementById('hm1'), hrs);
+    cu(document.getElementById('hm2'), sc+mc);
+    cu(document.getElementById('hm3'), Math.round(heap));
+    document.getElementById('hm4').innerText = pc;
+
+    cu(document.getElementById('m1'), hrs);
+    cu(document.getElementById('m2'), sc);
+    cu(document.getElementById('m3'), mc);
+    cu(document.getElementById('m4'), dl);
+    document.getElementById('m5').innerText = d.memory?.heapUsed||'--';
+
+    const q = d.officialApi?.quota;
+    document.getElementById('mq').innerText = (q&&q!=='N/A') ? q : 'No credentials';
+    if (q&&q!=='N/A') {
+      const [u,mx] = q.split('/').map(Number);
+      if (mx) document.getElementById('mqb').style.width = Math.round(u/mx*100)+'%';
+    }
+
+    const ok = d.sessionReady;
+    const sb = document.getElementById('ms');
+    sb.textContent = ok ? 'Session Ready' : 'Warming Up';
+    sb.className = 'sb '+(ok?'ok':'bad');
+
+    const pi = typeof d.proxy==='object'
+      ? `${d.proxy.count} proxies — active: ${d.proxy.active}`
+      : (d.proxy||'direct');
+    document.getElementById('mp').innerText = 'proxy: '+pi;
+
+    document.getElementById('nl2').classList.toggle('on', ok);
+    document.getElementById('nt').textContent = ok ? 'System Ready' : 'Warming';
+    document.getElementById('nt').classList.toggle('on', ok);
+  } catch {
+    document.getElementById('nt').textContent = 'Offline';
+    document.getElementById('ms').textContent = 'Offline';
+    document.getElementById('ms').className = 'sb bad';
+  }
+}
+stats(); setInterval(stats, 12000);
+
+// ── CONSOLE ───────────────────────────────────────────────────────────
+function sp(p) {
+  const i = document.getElementById('ci');
+  i.value = p; i.focus();
+  i.style.borderColor = 'var(--gold)';
+  setTimeout(() => i.style.borderColor = '', 700);
+  i.scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+async function run() {
+  const btn  = document.getElementById('cb');
+  const out  = document.getElementById('co');
+  const st   = document.getElementById('cs');
+  const path = document.getElementById('ci').value.trim();
+  if (!path) return;
+  btn.textContent = '...';
+  out.style.color = 'var(--muted)';
+  out.textContent = '// Connecting...\n// '+BASE+path;
+  st.textContent = 'running'; st.className = 'otag';
+  try {
+    const t = performance.now();
+    const res = await fetch(BASE+(path.startsWith('/')?'':'/')+path);
+    const ms = Math.round(performance.now()-t);
+    if (path.includes('/download')) {
+      out.style.color = 'var(--text)';
+      out.textContent = '// Stream initiated.\n// Opening file in new tab.';
+      st.textContent = '200 — '+ms+'ms'; st.className = 'otag ok';
+      window.open(BASE+path,'_blank'); return;
+    }
+    const data = await res.json();
+    out.style.color = 'var(--text)';
+    out.textContent = JSON.stringify(data,null,2);
+    st.textContent = res.status+' — '+ms+'ms';
+    st.className = 'otag '+(res.ok?'ok':'er');
+  } catch(e) {
+    out.style.color = '#c06060';
+    out.textContent = '// Error: '+e.message;
+    st.textContent = 'error'; st.className = 'otag er';
+  } finally { btn.textContent = 'Execute'; }
+}
+
+document.getElementById('ci').addEventListener('keydown', e => {
+  if (e.key==='Enter') run();
+});
+</script>
+
 </body>
 </html>
-
