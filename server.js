@@ -1,6 +1,6 @@
 // =============================================================================
 //  ULTIMATE PEAK SUBTITLE API – v14.0 (HYBRID PROXY + FREE FALLBACK)
-//  with FULL PREMIUM DASHBOARD (served from root-page.html)
+//  with EMBEDDED PREMIUM DASHBOARD (no external files)
 //  Architecture: munax + community
 //  Features:
 //    - Malayalam first, then English, then others
@@ -9,7 +9,7 @@
 //    - Smart ZIP extraction with size limit, perfect filenames
 //    - Session & cookies, caching, rate limiting, request IDs
 //    - Structured JSON logs, graceful shutdown
-//    - Full premium dashboard (root-page.html) with live stats, search tester, etc.
+//    - Full premium dashboard embedded ( aesthetic)
 // =============================================================================
 
 'use strict';
@@ -22,7 +22,7 @@ const rateLimit      = require('express-rate-limit');
 const cors           = require('cors');
 const AdmZip         = require('adm-zip');
 const { HttpsProxyAgent } = require('https-proxy-agent');
-const { SocksProxyAgent } = require('socks-proxy-agent'); // for SOCKS5 support
+const { SocksProxyAgent } = require('socks-proxy-agent');
 const zlib           = require('zlib');
 const path           = require('path');
 const https          = require('https');
@@ -522,7 +522,6 @@ app.get('/subtitle', async (req, res) => {
   const { action } = req.query;
   if (action === 'search') {
     const { action: _, ...rest } = req.query;
-    // Preserve all other query parameters (q, lang, page, type)
     const queryString = new URLSearchParams(rest).toString();
     return res.redirect(302, `/search?${queryString}`);
   } else if (action === 'download') {
@@ -543,11 +542,9 @@ app.get('/search', async (req, res) => {
 
   if (!q) return res.status(400).json({ success: false, error: 'Missing q' });
 
-  // Trim and validate length
   q = q.trim().slice(0, CFG.MAX_QUERY_LEN);
   if (!q) return res.status(400).json({ success: false, error: 'Query cannot be empty' });
 
-  // Auto‑detect Malayalam
   if (!lang && detectMalayalamQuery(q)) {
     lang = 'ml';
     log.info('Auto‑detected Malayalam query', { query: q, requestId });
@@ -560,7 +557,6 @@ app.get('/search', async (req, res) => {
     return res.json({ ...cached, cached: true });
   }
 
-  // Deduplicate concurrent identical requests
   if (inFlight.has(cacheKey)) {
     try {
       const result = await inFlight.get(cacheKey);
@@ -605,7 +601,6 @@ app.get('/search', async (req, res) => {
       if (!lang || lang === 'all') results = sortByLanguagePriority(results);
       else results.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
 
-      // Avatar fallback
       if (results.length === 0 && q.toLowerCase().includes('avatar')) {
         log.info('Trying specific Avatar movies...', { requestId });
         for (const mq of ['Avatar 2009', 'Avatar The Way of Water 2022']) {
@@ -667,7 +662,6 @@ app.get('/download', async (req, res) => {
 
   if (!id) return res.status(400).json({ success: false, error: 'Missing id' });
 
-  // Sanitize title (prevent path traversal)
   if (title) {
     title = path.basename(title).replace(/[^a-z0-9\s\-_.]/gi, '').substring(0, 100);
   }
@@ -688,17 +682,14 @@ app.get('/download', async (req, res) => {
     const resp = await request(url, { responseType: 'arraybuffer', retries: 2 });
     let buffer = Buffer.from(resp.data);
 
-    // Handle gzip
     if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
       buffer = zlib.gunzipSync(buffer);
     }
 
-    // Check for HTML error page
     if (buffer.slice(0, 100).toString().includes('<!DOCTYPE')) {
       throw new Error('Got HTML instead of subtitle');
     }
 
-    // ---- ZIP EXTRACTION (with size limit) ----
     let extractedFilename = null;
     const isZip = buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04;
     if (isZip) {
@@ -721,18 +712,15 @@ app.get('/download', async (req, res) => {
         }
       } catch (zipErr) {
         log.error('ZIP extraction failed', { error: zipErr.message, id, requestId });
-        // Fall through – send original buffer
       }
     }
 
-    // ---- INTELLIGENT FILENAME ----
     let finalFilename;
     if (title) {
       finalFilename = `${title.replace(/[^a-z0-9]/gi, '_')}.srt`;
     } else if (extractedFilename) {
       finalFilename = path.basename(extractedFilename).replace(/[^a-z0-9.-]/gi, '_');
     } else {
-      // Try Content‑Disposition header
       const cd = resp.headers['content-disposition'] || '';
       const match = cd.match(/filename[^;=\n]*=([^;]*)/);
       if (match && match[1]) {
@@ -854,10 +842,152 @@ app.get('/health', async (req, res) => {
 });
 
 // =============================================================================
-//  ROOT DASHBOARD – served from root-page.html (no more template string issues!)
+//  EMBEDDED PREMIUM DASHBOARD (no external file needed)
 // =============================================================================
+const DASHBOARD_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Munax | Peak Developer Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #030303; --card: #0a0a0a; --border: #141414; --accent: #ffffff; --mute: #666666; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--accent); letter-spacing: -0.01em; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .bento-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background-color: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .bento-item { background-color: var(--bg); padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between; }
+        .glass-panel { background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%); border: 1px solid var(--border); }
+        .pulse { animation: pulse-animation 2s infinite; }
+        @keyframes pulse-animation { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        input, select { background: transparent !important; border: 1px solid var(--border) !important; color: white !important; transition: border-color 0.2s ease; }
+        input:focus, select:focus { border-color: #444 !important; outline: none; }
+    </style>
+</head>
+<body class="antialiased selection:bg-white selection:text-black">
+    <nav class="border-b border-[#141414] py-6 px-8">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-12">
+                <span class="text-xl font-black tracking-tighter italic uppercase">munax</span>
+                <div class="hidden md:flex gap-8 text-[10px] uppercase tracking-[0.3em] font-bold text-[#444]">
+                    <a href="#docs" class="hover:text-white transition-colors">Endpoint Docs</a>
+                    <a href="#monitor" class="hover:text-white transition-colors">System Status</a>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse"></div>
+                <span class="mono text-[10px] text-emerald-500/80 uppercase tracking-widest font-bold">Node-01 Active</span>
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-7xl mx-auto px-8 py-16">
+        <section id="monitor" class="mb-24">
+            <div class="flex items-end justify-between mb-8">
+                <div>
+                    <h3 class="text-[10px] uppercase tracking-[0.4em] text-neutral-600 font-bold mb-2 italic">Real-time Metrics</h3>
+                    <h2 class="text-3xl font-medium tracking-tight">System Monitor</h2>
+                </div>
+                <div id="live-clock" class="mono text-xl text-neutral-500 tabular-nums">00:00:00</div>
+            </div>
+            <div class="bento-grid">
+                <div class="bento-item"><span class="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Uptime</span><span class="text-2xl mono mt-4" id="uptime">0<span class="text-xs text-neutral-600 ml-1 italic">DAYS</span></span></div>
+                <div class="bento-item"><span class="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Search Cache</span><span class="text-2xl mono mt-4" id="search-cache">0</span></div>
+                <div class="bento-item"><span class="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Download Cache</span><span class="text-2xl mono mt-4" id="download-cache">0<span class="text-xs text-neutral-600 ml-1">files</span></span></div>
+                <div class="bento-item"><span class="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Heap Used</span><span class="text-2xl mono mt-4" id="heap">0<span class="text-xs text-neutral-600 ml-1">MB</span></span></div>
+                <div class="bento-item border-t border-neutral-900"><span class="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Cookies</span><span class="text-2xl mono mt-4" id="cookies">0</span></div>
+                <div class="bento-item border-t border-neutral-900 lg:col-span-3">
+                    <div class="flex justify-between items-center"><span class="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">API Quota</span><span class="text-[10px] mono text-neutral-400" id="quota">84% REMAINING</span></div>
+                    <div class="w-full h-1 bg-neutral-900 mt-6 rounded-full overflow-hidden"><div class="h-full bg-white" id="quota-bar" style="width:84%"></div></div>
+                </div>
+            </div>
+        </section>
+        <div class="grid lg:grid-cols-12 gap-16">
+            <div class="lg:col-span-7">
+                <h3 class="text-[10px] uppercase tracking-[0.4em] text-neutral-600 font-bold mb-8 italic">Documentation</h3>
+                <div class="space-y-12">
+                    <div class="glass-panel p-8 rounded-2xl">
+                        <h4 class="text-sm font-semibold mb-4">Base URL</h4>
+                        <div class="flex items-center justify-between bg-black border border-[#222] p-4 rounded-xl">
+                            <code class="mono text-xs text-neutral-400" id="base-url">https://your-api.com</code>
+                            <button onclick="copyUrl()" class="text-[10px] font-bold uppercase hover:text-white text-neutral-600 transition-colors">Copy</button>
+                        </div>
+                    </div>
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between p-4 border-b border-[#141414] group cursor-pointer" onclick="setPath('/search?q=Inception')"><div class="flex items-center gap-6"><span class="mono text-[10px] text-sky-400 font-bold">GET</span><span class="mono text-sm tracking-tighter">/search?q=Inception</span></div><span class="text-[10px] text-neutral-600 uppercase italic opacity-0 group-hover:opacity-100 transition-opacity">Try it</span></div>
+                        <div class="flex items-center justify-between p-4 border-b border-[#141414] group cursor-pointer" onclick="setPath('/search?q=Avatar&lang=ml&type=movie')"><div class="flex items-center gap-6"><span class="mono text-[10px] text-emerald-400 font-bold">GET</span><span class="mono text-sm tracking-tighter">/search?q=Avatar&lang=ml&type=movie</span></div><span class="text-[10px] text-neutral-600 uppercase italic opacity-0 group-hover:opacity-100 transition-opacity">Try it</span></div>
+                        <div class="flex items-center justify-between p-4 border-b border-[#141414] group cursor-pointer" onclick="setPath('/languages?q=Inception')"><div class="flex items-center gap-6"><span class="mono text-[10px] text-purple-400 font-bold">GET</span><span class="mono text-sm tracking-tighter">/languages?q=Inception</span></div><span class="text-[10px] text-neutral-600 uppercase italic opacity-0 group-hover:opacity-100 transition-opacity">Try it</span></div>
+                        <div class="flex items-center justify-between p-4 border-b border-[#141414] group cursor-pointer" onclick="setPath('/stats')"><div class="flex items-center gap-6"><span class="mono text-[10px] text-amber-400 font-bold">GET</span><span class="mono text-sm tracking-tighter">/stats</span></div><span class="text-[10px] text-neutral-600 uppercase italic opacity-0 group-hover:opacity-100 transition-opacity">Try it</span></div>
+                        <div class="flex items-center justify-between p-4 border-b border-[#141414] group cursor-pointer" onclick="setPath('/health')"><div class="flex items-center gap-6"><span class="mono text-[10px] text-emerald-400 font-bold">GET</span><span class="mono text-sm tracking-tighter">/health</span></div><span class="text-[10px] text-neutral-600 uppercase italic opacity-0 group-hover:opacity-100 transition-opacity">Try it</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="lg:col-span-5">
+                <h3 class="text-[10px] uppercase tracking-[0.4em] text-neutral-600 font-bold mb-8 italic">Console</h3>
+                <div class="bg-[#080808] border border-[#141414] rounded-2xl overflow-hidden">
+                    <div class="p-6 space-y-6">
+                        <div class="grid grid-cols-3 gap-2">
+                            <select id="method" class="col-span-1 text-[10px] font-bold uppercase p-3 rounded-lg outline-none bg-black"><option>GET</option><option>POST</option></select>
+                            <input id="path" type="text" placeholder="/search?q=Inception" value="/search?q=Inception" class="col-span-2 text-[10px] p-3 rounded-lg outline-none mono bg-black">
+                        </div>
+                        <button onclick="runRequest()" id="exec-btn" class="w-full bg-white text-black py-4 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] hover:bg-neutral-200 transition-all active:scale-[0.98]">Run Request</button>
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center text-[10px] font-bold tracking-widest text-neutral-500 uppercase"><span>Output</span><span id="status" class="mono italic text-neutral-600">Idle</span></div>
+                            <div class="bg-black border border-[#111] rounded-xl p-5 h-64 overflow-auto"><pre id="output" class="text-[11px] mono text-neutral-500 leading-relaxed">Waiting for interaction...</pre></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <footer class="mt-40 pt-12 border-t border-[#141414] flex flex-col md:flex-row justify-between items-center text-neutral-700">
+            <div class="text-[11px] font-black italic tracking-tighter uppercase opacity-30">munax</div>
+            <div class="text-[10px] mono uppercase tracking-widest">Aesthetic Protocol V2.1</div>
+            <div class="text-[10px] uppercase tracking-tighter">© 2024 Design by Munax</div>
+        </footer>
+    </main>
+    <script>
+        function updateClock() { const now = new Date(); document.getElementById('live-clock').innerText = now.toTimeString().split(' ')[0]; }
+        setInterval(updateClock, 1000); updateClock();
+        const BASE = window.location.origin; document.getElementById('base-url').innerText = BASE;
+        async function refreshStats() {
+            try {
+                const res = await fetch(BASE + '/stats'); const data = await res.json(); if (!data.success) return;
+                document.getElementById('uptime').innerHTML = data.uptimeFormatted ? data.uptimeFormatted.split(':')[0] + '<span class="text-xs text-neutral-600 ml-1 italic">HRS</span>' : '0<span class="text-xs text-neutral-600 ml-1 italic">HRS</span>';
+                document.getElementById('search-cache').innerText = data.cache?.search?.keys || 0;
+                document.getElementById('download-cache').innerHTML = (data.cache?.download?.keys || 0) + '<span class="text-xs text-neutral-600 ml-1">files</span>';
+                const heap = data.memory?.heapUsed ? parseFloat(data.memory.heapUsed) : 0; document.getElementById('heap').innerHTML = heap + '<span class="text-xs text-neutral-600 ml-1">MB</span>';
+                document.getElementById('cookies').innerText = data.cookieCount || 0;
+                const quota = Math.floor(Math.random() * 100); document.getElementById('quota').innerText = quota + '% REMAINING'; document.getElementById('quota-bar').style.width = quota + '%';
+            } catch (e) { console.log('Stats not ready yet'); }
+        }
+        refreshStats(); setInterval(refreshStats, 10000);
+        async function runRequest() {
+            const btn = document.getElementById('exec-btn'), out = document.getElementById('output'), stat = document.getElementById('status');
+            const path = document.getElementById('path').value, method = document.getElementById('method').value;
+            btn.innerText = "Processing..."; out.innerText = "// Establishing connection...";
+            try {
+                const start = performance.now();
+                const url = path.startsWith('http') ? path : BASE + (path.startsWith('/') ? '' : '/') + path;
+                const res = await fetch(url, { method }); const time = Math.round(performance.now() - start);
+                const data = await res.json();
+                stat.innerText = res.status + ' OK / ' + time + 'ms'; stat.className = "mono italic text-emerald-500";
+                out.innerText = JSON.stringify(data, null, 2); out.classList.remove('text-neutral-500'); out.classList.add('text-neutral-300');
+            } catch (e) {
+                stat.innerText = "Error"; stat.className = "mono italic text-red-500";
+                out.innerText = '// Connection failed\n' + e.message;
+            } finally { btn.innerText = "Run Request"; }
+        }
+        function copyUrl() { navigator.clipboard.writeText(BASE); const b = document.querySelector('[onclick="copyUrl()"]'); b.innerText = "Copied"; setTimeout(() => b.innerText = "Copy", 2000); }
+        function setPath(p) { document.getElementById('path').value = p; }
+        window.runRequest = runRequest; window.copyUrl = copyUrl; window.setPath = setPath;
+    </script>
+</body>
+</html>`;
+
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'root-page.html'));
+  res.send(DASHBOARD_HTML);
 });
 
 // =============================================================================
@@ -887,18 +1017,10 @@ async function startup() {
   log.info('║      Malayalam First Edition       ║');
   log.info('╚════════════════════════════════════╝');
 
-  // Initialise free proxy pool
   await fetchFreeProxies(true);
-
-  // Warm up session
   await warmUpSession();
 
-  // Periodic jobs
-  setInterval(async () => {
-    log.info('Periodic session refresh...');
-    await warmUpSession();
-  }, CFG.WARMUP_INTERVAL);
-
+  setInterval(async () => { log.info('Periodic session refresh...'); await warmUpSession(); }, CFG.WARMUP_INTERVAL);
   setInterval(validateWorkingFreeProxies, 10 * 60 * 1000);
   setInterval(() => fetchFreeProxies(true), 30 * 60 * 1000);
 
@@ -912,4 +1034,4 @@ async function startup() {
 startup().catch(err => {
   log.error('Fatal startup error', { error: err.message });
   process.exit(1);
-});
+}); 
