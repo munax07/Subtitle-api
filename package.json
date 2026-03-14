@@ -1,11 +1,10 @@
 {
-  "name": "void-cinema-api",
-  "version": "14.0.0",
-  "description": "VOID CINEMA — OpenSubtitles Proxy API. Architecture: munax",
+  "name": "subtitle-api-ak46",
+  "version": "15.0.0",
+  "description": "ULTIMATE PEAK SUBTITLE API – AK46 EDITION",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.10",
@@ -21,7 +20,5 @@
   },
   "engines": {
     "node": ">=18"
-  },
-  "author": "munax",
-  "license": "MIT"
+  }
 }
