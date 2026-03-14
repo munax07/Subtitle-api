@@ -1,15 +1,16 @@
 // =============================================================================
-//  ULTIMATE PEAK SUBTITLE API – v14.0 (HYBRID PROXY + FREE FALLBACK)
-//  with EMBEDDED PREMIUM DASHBOARD (no external files)
-//  Architecture: munax + community
+//  ULTIMATE PEAK SUBTITLE API – AK46 EDITION (Bulletproof)
+//  Architecture: munax + Jerry 
 //  Features:
 //    - Malayalam first, then English, then others
-//    - Env‑var proxy pool (PROXY_URL, BACKUP_PROXY_1..20)
-//    - Auto‑refreshing free proxy fallback (when env proxies fail/unset)
+//    - Hybrid proxy: residential (PROXY_URL + BACKUP_PROXY_1..20) + free fallback
+//    - Auto‑refreshing free proxy pool (TheSpeedX, refreshed every 30 min)
 //    - Smart ZIP extraction with size limit, perfect filenames
 //    - Session & cookies, caching, rate limiting, request IDs
-//    - Structured JSON logs, graceful shutdown
-//    - Full premium dashboard embedded ( aesthetic)
+//    - Structured JSON logs, graceful shutdown, global error handlers
+//    - Response time, ETag, Retry‑After headers
+//    - Self‑ping (keeps Koyeb alive) & memory watchdog
+//    - Full premium embedded dashboard (Munax aesthetic)
 // =============================================================================
 
 'use strict';
@@ -20,6 +21,7 @@ const cheerio        = require('cheerio');
 const NodeCache      = require('node-cache');
 const rateLimit      = require('express-rate-limit');
 const cors           = require('cors');
+const compression    = require('compression');
 const AdmZip         = require('adm-zip');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { SocksProxyAgent } = require('socks-proxy-agent');
@@ -30,6 +32,9 @@ const { randomUUID } = require('crypto');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// Enable compression for responses (reduces bandwidth)
+app.use(compression());
 
 // =============================================================================
 //  PLATFORM DETECTION
@@ -56,12 +61,23 @@ const IS_SERVERLESS = PLATFORM === 'vercel';
 app.set('trust proxy', IS_SERVERLESS ? false : 1);
 
 // =============================================================================
+//  GLOBAL ERROR HANDLERS (prevent crashes)
+// =============================================================================
+process.on('uncaughtException', (err) => {
+  console.error('❌ UNCAUGHT EXCEPTION:', err);
+  // Optionally, you could log to a service, but we'll keep it simple
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ UNHANDLED REJECTION at:', promise, 'reason:', reason);
+});
+
+// =============================================================================
 //  CONFIGURATION
 // =============================================================================
 const CFG = {
   CACHE_SEARCH_TTL : parseInt(process.env.CACHE_TTL_SEARCH) || 600,  // 10 min
   CACHE_DL_TTL     : parseInt(process.env.CACHE_TTL_DL)     || 1800, // 30 min
-  CACHE_META_TTL   : 3600,                                          // 1 hr – subtitle metadata
+  CACHE_META_TTL   : 3600,                                          // 1 hr – subtitle metadata (used in /download)
   RATE_MAX         : parseInt(process.env.RATE_LIMIT_MAX)   || 100,
   RATE_WINDOW_MS   : 15 * 60 * 1000,                                // 15 min
   REQ_TIMEOUT      : parseInt(process.env.REQUEST_TIMEOUT_MS) || 20000,
@@ -72,6 +88,8 @@ const CFG = {
   WARMUP_INTERVAL  : 2 * 60 * 60 * 1000,                            // 2 hours
   MEMORY_LIMIT     : (parseInt(process.env.MEMORY_LIMIT_MB) || 512) * 1024 * 1024,
   MEMORY_WARN      : 0.82,
+  // Self‑ping interval (if on Koyeb/Render, keep alive)
+  SELF_PING_MS     : 9 * 60 * 1000,                                 // 9 minutes
 };
 
 // =============================================================================
@@ -93,7 +111,7 @@ const log = {
 // =============================================================================
 const searchCache = new NodeCache({ stdTTL: CFG.CACHE_SEARCH_TTL, checkperiod: 120, useClones: false });
 const dlCache     = new NodeCache({ stdTTL: CFG.CACHE_DL_TTL,     checkperiod: 180, useClones: false });
-const metaCache   = new NodeCache({ stdTTL: CFG.CACHE_META_TTL,   checkperiod: 300, useClones: false });
+const metaCache   = new NodeCache({ stdTTL: CFG.CACHE_META_TTL,   checkperiod: 300, useClones: false }); // used for subtitle metadata
 
 // In‑flight request deduplication (optional)
 const inFlight = new Map();
@@ -492,12 +510,12 @@ function detectMalayalamQuery(q) {
 }
 
 // =============================================================================
-//  RATE LIMITER
+//  RATE LIMITER with Retry-After header
 // =============================================================================
 const limiter = rateLimit({
   windowMs: CFG.RATE_WINDOW_MS,
   max: CFG.RATE_MAX,
-  standardHeaders: true,
+  standardHeaders: true,  // sends `RateLimit-*` headers
   legacyHeaders: false,
   message: { success: false, error: 'Too many requests, please try again later.' },
   keyGenerator: (req) => req.headers['x-request-id'] || req.ip,
@@ -514,6 +532,22 @@ app.use((req, res, next) => {
   res.setHeader('X-Request-ID', requestId);
   next();
 });
+
+// =============================================================================
+//  RESPONSE TIME & ETAG MIDDLEWARE
+// =============================================================================
+app.use((req, res, next) => {
+  const start = process.hrtime();
+  res.on('finish', () => {
+    const diff = process.hrtime(start);
+    const ms = (diff[0] * 1e3 + diff[1] / 1e6).toFixed(0);
+    res.setHeader('X-Response-Time', `${ms}ms`);
+  });
+  next();
+});
+
+// Simple ETag generation (for search endpoint – we'll add manually later)
+// Not adding global ETag because we want to control per endpoint.
 
 // =============================================================================
 //  COMPATIBILITY ROUTE: /subtitle (for old dashboard)
@@ -533,7 +567,7 @@ app.get('/subtitle', async (req, res) => {
 });
 
 // =============================================================================
-//  ENDPOINT: /search
+//  ENDPOINT: /search (with ETag support)
 // =============================================================================
 app.get('/search', async (req, res) => {
   const start = Date.now();
@@ -553,6 +587,13 @@ app.get('/search', async (req, res) => {
   const cacheKey = `search:${q}:${lang || 'all'}:${type || 'all'}`;
   const cached = searchCache.get(cacheKey);
   if (cached) {
+    // Generate ETag from cached data
+    const etag = `"${Buffer.from(JSON.stringify(cached)).toString('base64').substring(0, 27)}"`;
+    res.setHeader('ETag', etag);
+    // If client sends If-None-Match, return 304
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
     log.info('Cache hit', { cacheKey, requestId, duration: Date.now() - start });
     return res.json({ ...cached, cached: true });
   }
@@ -601,6 +642,7 @@ app.get('/search', async (req, res) => {
       if (!lang || lang === 'all') results = sortByLanguagePriority(results);
       else results.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
 
+      // Avatar fallback
       if (results.length === 0 && q.toLowerCase().includes('avatar')) {
         log.info('Trying specific Avatar movies...', { requestId });
         for (const mq of ['Avatar 2009', 'Avatar The Way of Water 2022']) {
@@ -633,6 +675,8 @@ app.get('/search', async (req, res) => {
 
       const response = { success: true, count: results.length, query: q, results: results.slice(0, CFG.MAX_RESULTS) };
       searchCache.set(cacheKey, response);
+      // Also store in metaCache for later use in download (optional)
+      results.forEach(r => metaCache.set(r.id, r));
       log.info('Search completed', { count: results.length, requestId, duration: Date.now() - start });
       return response;
     } catch (err) {
@@ -646,6 +690,9 @@ app.get('/search', async (req, res) => {
   inFlight.set(cacheKey, promise);
   try {
     const result = await promise;
+    // Generate ETag for the response
+    const etag = `"${Buffer.from(JSON.stringify(result)).toString('base64').substring(0, 27)}"`;
+    res.setHeader('ETag', etag);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: 'Search failed. Try again.' });
@@ -653,7 +700,7 @@ app.get('/search', async (req, res) => {
 });
 
 // =============================================================================
-//  ENDPOINT: /download (with ZIP extraction & perfect filename)
+//  ENDPOINT: /download (with ZIP extraction & perfect filename, using metaCache)
 // =============================================================================
 app.get('/download', async (req, res) => {
   const start = Date.now();
@@ -662,8 +709,15 @@ app.get('/download', async (req, res) => {
 
   if (!id) return res.status(400).json({ success: false, error: 'Missing id' });
 
+  // Sanitize title (prevent path traversal)
   if (title) {
     title = path.basename(title).replace(/[^a-z0-9\s\-_.]/gi, '').substring(0, 100);
+  }
+
+  // Try to get metadata from metaCache
+  const meta = metaCache.get(id);
+  if (!title && meta && meta.title) {
+    title = meta.title.replace(/[^a-z0-9]/gi, '_');
   }
 
   const cacheKey = `dl:${id}`;
@@ -682,14 +736,17 @@ app.get('/download', async (req, res) => {
     const resp = await request(url, { responseType: 'arraybuffer', retries: 2 });
     let buffer = Buffer.from(resp.data);
 
+    // Handle gzip
     if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
       buffer = zlib.gunzipSync(buffer);
     }
 
+    // Check for HTML error page
     if (buffer.slice(0, 100).toString().includes('<!DOCTYPE')) {
       throw new Error('Got HTML instead of subtitle');
     }
 
+    // ---- ZIP EXTRACTION (with size limit) ----
     let extractedFilename = null;
     const isZip = buffer.length > 4 && buffer[0] === 0x50 && buffer[1] === 0x4B && buffer[2] === 0x03 && buffer[3] === 0x04;
     if (isZip) {
@@ -712,15 +769,18 @@ app.get('/download', async (req, res) => {
         }
       } catch (zipErr) {
         log.error('ZIP extraction failed', { error: zipErr.message, id, requestId });
+        // Fall through – send original buffer
       }
     }
 
+    // ---- INTELLIGENT FILENAME ----
     let finalFilename;
     if (title) {
       finalFilename = `${title.replace(/[^a-z0-9]/gi, '_')}.srt`;
     } else if (extractedFilename) {
       finalFilename = path.basename(extractedFilename).replace(/[^a-z0-9.-]/gi, '_');
     } else {
+      // Try Content‑Disposition header
       const cd = resp.headers['content-disposition'] || '';
       const match = cd.match(/filename[^;=\n]*=([^;]*)/);
       if (match && match[1]) {
@@ -810,6 +870,9 @@ app.get('/stats', (req, res) => {
         hits: dlCache.getStats().hits,
         misses: dlCache.getStats().misses,
       },
+      meta: {
+        keys: metaCache.getStats().keys,
+      },
     },
   });
 });
@@ -842,7 +905,14 @@ app.get('/health', async (req, res) => {
 });
 
 // =============================================================================
-//  EMBEDDED PREMIUM DASHBOARD (no external file needed)
+//  SELF‑PING ENDPOINT (to keep Koyeb alive)
+// =============================================================================
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
+});
+
+// =============================================================================
+//  EMBEDDED PREMIUM DASHBOARD (Munax aesthetic)
 // =============================================================================
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -991,6 +1061,39 @@ app.get('/', (req, res) => {
 });
 
 // =============================================================================
+//  MEMORY WATCHDOG
+// =============================================================================
+function checkMemory() {
+  const mem = process.memoryUsage();
+  const heapUsed = mem.heapUsed;
+  if (heapUsed > CFG.MEMORY_LIMIT * CFG.MEMORY_WARN) {
+    log.warn('Memory usage high', { heapUsed, limit: CFG.MEMORY_LIMIT });
+    // Optionally, you could clear caches
+    if (heapUsed > CFG.MEMORY_LIMIT) {
+      log.error('Memory limit exceeded, clearing caches');
+      searchCache.flushAll();
+      dlCache.flushAll();
+      metaCache.flushAll();
+    }
+  }
+}
+setInterval(checkMemory, 60 * 1000); // check every minute
+
+// =============================================================================
+//  SELF‑PING LOOP (keep Koyeb alive)
+// =============================================================================
+if (PLATFORM !== 'local' && !IS_SERVERLESS) {
+  setInterval(async () => {
+    try {
+      await axios.get(`${BASE_URL}/ping`, { timeout: 5000 });
+      log.debug('Self‑ping successful');
+    } catch (e) {
+      log.warn('Self‑ping failed', { error: e.message });
+    }
+  }, CFG.SELF_PING_MS);
+}
+
+// =============================================================================
 //  GRACEFUL SHUTDOWN
 // =============================================================================
 let server;
@@ -1013,7 +1116,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 // =============================================================================
 async function startup() {
   log.info('╔════════════════════════════════════╗');
-  log.info('║   ULTRA PEAK SUBTITLE API v14.0   ║');
+  log.info('║   ULTRA PEAK SUBTITLE API – AK46  ║');
   log.info('║      Malayalam First Edition       ║');
   log.info('╚════════════════════════════════════╝');
 
@@ -1034,4 +1137,4 @@ async function startup() {
 startup().catch(err => {
   log.error('Fatal startup error', { error: err.message });
   process.exit(1);
-}); 
+});
