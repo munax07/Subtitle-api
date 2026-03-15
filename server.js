@@ -1,4 +1,4 @@
-‘use strict’;
+'use strict';
 
 // =============================================================================
 //  VOID CINEMA  FINAL BOSS
@@ -11,7 +11,7 @@
 //    S3  sub.wyzie.io                          zero CF, direct JSON
 //
 //    Smart retry: if all 4 sources return 0 results,
-//    auto-appends year variants (“Vikram” -> “Vikram 2022” etc.)
+//    auto-appends year variants ("Vikram" -> "Vikram 2022" etc.)
 //
 //  DOWNLOAD — 3 methods, first success wins:
 //    M0  Official API download link   (when S0 used)
@@ -30,20 +30,20 @@
 //    BACKUP_PROXY_1   up to BACKUP_PROXY_20
 // =============================================================================
 
-const express             = require(‘express’);
-const axios               = require(‘axios’);
-const cheerio             = require(‘cheerio’);
-const NodeCache           = require(‘node-cache’);
-const rateLimit           = require(‘express-rate-limit’);
-const cors                = require(‘cors’);
-const compression         = require(‘compression’);
-const AdmZip              = require(‘adm-zip’);
-const { HttpsProxyAgent } = require(‘https-proxy-agent’);
-const { SocksProxyAgent } = require(‘socks-proxy-agent’);
-const zlib                = require(‘zlib’);
-const https               = require(‘https’);
-const path                = require(‘path’);
-const { randomUUID }      = require(‘crypto’);
+const express             = require('express');
+const axios               = require('axios');
+const cheerio             = require('cheerio');
+const NodeCache           = require('node-cache');
+const rateLimit           = require('express-rate-limit');
+const cors                = require('cors');
+const compression         = require('compression');
+const AdmZip              = require('adm-zip');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const { SocksProxyAgent } = require('socks-proxy-agent');
+const zlib                = require('zlib');
+const https               = require('https');
+const path                = require('path');
+const { randomUUID }      = require('crypto');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -52,25 +52,25 @@ const PORT = process.env.PORT || 3000;
 //  PLATFORM
 // =============================================================================
 const PLATFORM = (() => {
-if (process.env.RENDER === ‘true’ || process.env.RENDER_EXTERNAL_URL) return ‘render’;
-if (process.env.KOYEB_APP_NAME    || process.env.KOYEB)               return ‘koyeb’;
-if (process.env.VERCEL            || process.env.VERCEL_URL)           return ‘vercel’;
-if (process.env.RAILWAY_STATIC_URL|| process.env.RAILWAY_ENVIRONMENT)  return ‘railway’;
-if (process.env.FLY_APP_NAME)                                          return ‘fly’;
-return ‘local’;
+if (process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL) return 'render';
+if (process.env.KOYEB_APP_NAME    || process.env.KOYEB)               return 'koyeb';
+if (process.env.VERCEL            || process.env.VERCEL_URL)           return 'vercel';
+if (process.env.RAILWAY_STATIC_URL|| process.env.RAILWAY_ENVIRONMENT)  return 'railway';
+if (process.env.FLY_APP_NAME)                                          return 'fly';
+return 'local';
 })();
 
 const BASE_URL = (() => {
-if (PLATFORM === ‘render’)  return process.env.RENDER_EXTERNAL_URL  || (‘http://localhost:’ + PORT);
-if (PLATFORM === ‘koyeb’)   return ‘https://’ + (process.env.KOYEB_PUBLIC_DOMAIN || ((process.env.KOYEB_APP_NAME || ‘app’) + ‘.koyeb.app’));
-if (PLATFORM === ‘vercel’)  return process.env.VERCEL_URL ? (‘https://’ + process.env.VERCEL_URL) : (‘http://localhost:’ + PORT);
-if (PLATFORM === ‘railway’) return process.env.RAILWAY_STATIC_URL   || (‘http://localhost:’ + PORT);
-if (PLATFORM === ‘fly’)     return ‘https://’ + process.env.FLY_APP_NAME + ‘.fly.dev’;
-return ‘http://localhost:’ + PORT;
+if (PLATFORM === 'render')  return process.env.RENDER_EXTERNAL_URL  || ('http://localhost:' + PORT);
+if (PLATFORM === 'koyeb')   return 'https://' + (process.env.KOYEB_PUBLIC_DOMAIN || ((process.env.KOYEB_APP_NAME || 'app') + '.koyeb.app'));
+if (PLATFORM === 'vercel')  return process.env.VERCEL_URL ? ('https://' + process.env.VERCEL_URL) : ('http://localhost:' + PORT);
+if (PLATFORM === 'railway') return process.env.RAILWAY_STATIC_URL   || ('http://localhost:' + PORT);
+if (PLATFORM === 'fly')     return 'https://' + process.env.FLY_APP_NAME + '.fly.dev';
+return 'http://localhost:' + PORT;
 })();
 
-const IS_SERVERLESS = PLATFORM === ‘vercel’;
-app.set(‘trust proxy’, IS_SERVERLESS ? false : 1);
+const IS_SERVERLESS = PLATFORM === 'vercel';
+app.set('trust proxy', IS_SERVERLESS ? false : 1);
 
 // =============================================================================
 //  CONFIG
@@ -89,15 +89,15 @@ WARMUP_INTERVAL  : 90 * 60 * 1000,
 PING_INTERVAL    : 9  * 60 * 1000,
 MEMORY_LIMIT     : (parseInt(process.env.MEMORY_LIMIT_MB) || 512) * 1024 * 1024,
 MEMORY_WARN      : 0.80,
-// Official OS API — defaults from friend’s working account, override via env
-OS_API_KEY  : process.env.OS_API_KEY   || ‘jnMaFtWskYAcAHv42xUovuPcanowNys5’,
-OS_USERNAME : process.env.OS_USERNAME  || ‘crazydev’,
-OS_PASSWORD : process.env.OS_PASSWORD  || ‘hamza1’,
-OS_UA       : process.env.OS_USER_AGENT || ‘MySubDownloader v1.0’,
+// Official OS API — defaults from friend's working account, override via env
+OS_API_KEY  : process.env.OS_API_KEY   || '',
+OS_USERNAME : process.env.OS_USERNAME  || '',
+OS_PASSWORD : process.env.OS_PASSWORD  || '',
+OS_UA       : process.env.OS_USER_AGENT || 'VoidCinema/1.0',
 // Optional backup sources
-WYZIE_KEY   : process.env.WYZIE_KEY    || ‘wyzie-b8dc44d8e4c847ddc5e508166c34ee60’,
-OMDB_KEY    : process.env.OMDB_API_KEY || ‘743db943’,
-TMDB_KEY    : process.env.TMDB_API_KEY || ‘’,
+WYZIE_KEY   : process.env.WYZIE_KEY    || '',
+OMDB_KEY    : process.env.OMDB_API_KEY || '',
+TMDB_KEY    : process.env.TMDB_API_KEY || '',
 };
 
 // =============================================================================
@@ -109,23 +109,23 @@ const o = { level: lvl, timestamp: new Date().toISOString(), msg };
 if (meta && Object.keys(meta).length) Object.assign(o, meta);
 return JSON.stringify(o);
 },
-info  : (msg, m) => console.log(log._o(‘info’,  msg, m)),
-warn  : (msg, m) => console.warn(log._o(‘warn’,  msg, m)),
-error : (msg, m) => console.error(log._o(‘error’, msg, m)),
-debug : (msg, m) => { if (process.env.DEBUG) console.debug(log._o(‘debug’, msg, m)); },
+info  : (msg, m) => console.log(log._o('info',  msg, m)),
+warn  : (msg, m) => console.warn(log._o('warn',  msg, m)),
+error : (msg, m) => console.error(log._o('error', msg, m)),
+debug : (msg, m) => { if (process.env.DEBUG) console.debug(log._o('debug', msg, m)); },
 };
 
 // =============================================================================
 //  GLOBAL HANDLERS (after log so they can use it)
 // =============================================================================
-process.on(‘uncaughtException’,  err    => log.error(‘Uncaught exception’,  { error: err.message }));
-process.on(‘unhandledRejection’, reason => log.error(‘Unhandled rejection’, { reason: String(reason && reason.message ? reason.message : reason) }));
+process.on('uncaughtException',  err    => log.error('Uncaught exception',  { error: err.message }));
+process.on('unhandledRejection', reason => log.error('Unhandled rejection', { reason: String(reason && reason.message ? reason.message : reason) }));
 
 // =============================================================================
 //  CACHES
 // =============================================================================
-const searchCache = new NodeCache({ stdTTL: CFG.CACHE_SEARCH_TTL, checkperiod: 120, useClones: false });
-const dlCache     = new NodeCache({ stdTTL: CFG.CACHE_DL_TTL,     checkperiod: 180, useClones: false });
+const searchCache = new NodeCache({ stdTTL: CFG.CACHE_SEARCH_TTL, checkperiod: 120, useClones: false, maxKeys: 2000 });
+const dlCache     = new NodeCache({ stdTTL: CFG.CACHE_DL_TTL,     checkperiod: 180, useClones: false, maxKeys: 500  });
 const metaCache   = new NodeCache({ stdTTL: CFG.CACHE_META_TTL,   checkperiod: 300, useClones: false, maxKeys: 5000 });
 const imdbCache   = new NodeCache({ stdTTL: CFG.CACHE_IMDB_TTL,   checkperiod: 600, useClones: false });
 const inFlight    = new Map();
@@ -133,7 +133,7 @@ const inFlight    = new Map();
 // =============================================================================
 //  OFFICIAL OS API TOKEN
 // =============================================================================
-let osToken       = ‘’;
+let osToken       = '';
 let osTokenExpiry = 0;
 let osQuotaUsed   = 0;
 let osQuotaMax    = 100;
@@ -142,23 +142,23 @@ async function getOsToken() {
 if (osToken && Date.now() < osTokenExpiry) return osToken;
 try {
 const res = await axios.post(
-‘https://api.opensubtitles.com/api/v1/login’,
+'https://api.opensubtitles.com/api/v1/login',
 { username: CFG.OS_USERNAME, password: CFG.OS_PASSWORD },
-{ headers: { ‘Api-Key’: CFG.OS_API_KEY, ‘User-Agent’: CFG.OS_UA, ‘Content-Type’: ‘application/json’ }, timeout: 12000 }
+{ headers: { 'Api-Key': CFG.OS_API_KEY, 'User-Agent': CFG.OS_UA, 'Content-Type': 'application/json' }, timeout: 12000 }
 );
 if (res.data && res.data.token) {
 osToken       = res.data.token;
 osTokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
 osQuotaUsed   = 0;
 osQuotaMax    = (res.data.user && res.data.user.allowed_downloads) ? res.data.user.allowed_downloads : 100;
-log.info(‘OS API token OK’, { quota: osQuotaMax });
+log.info('OS API token OK', { quota: osQuotaMax });
 return osToken;
 }
-throw new Error(‘No token in response’);
+throw new Error('No token in response');
 } catch (e) {
-log.warn(‘OS API login failed’, { error: e.message });
-osToken = ‘’;
-return ‘’;
+log.warn('OS API login failed', { error: e.message });
+osToken = '';
+return '';
 }
 }
 
@@ -167,16 +167,16 @@ return ‘’;
 // =============================================================================
 function buildProxyPool() {
 const list = [];
-if (process.env.PROXY_URL) list.push({ url: process.env.PROXY_URL, label: ‘primary’ });
+if (process.env.PROXY_URL) list.push({ url: process.env.PROXY_URL, label: 'primary' });
 for (let i = 1; i <= 20; i++) {
-const v = process.env[‘BACKUP_PROXY_’ + i];
-if (v) list.push({ url: v, label: ‘backup_’ + i });
+const v = process.env['BACKUP_PROXY_' + i];
+if (v) list.push({ url: v, label: 'backup_' + i });
 }
 return list.map(p => {
 try {
-const agent = p.url.startsWith(‘socks’) ? new SocksProxyAgent(p.url) : new HttpsProxyAgent(p.url);
-return { label: p.label, agent, masked: p.url.replace(/:([^:@]{3})[^:@]*@/, ’:***@’) };
-} catch (e) { log.warn(‘Invalid proxy skipped’, { label: p.label, error: e.message }); return null; }
+const agent = p.url.startsWith('socks') ? new SocksProxyAgent(p.url) : new HttpsProxyAgent(p.url);
+return { label: p.label, agent, masked: p.url.replace(/:([^:@]{3})[^:@]*@/, ':***@') };
+} catch (e) { log.warn('Invalid proxy skipped', { label: p.label, error: e.message }); return null; }
 }).filter(Boolean);
 }
 
@@ -192,7 +192,7 @@ if (proxyFails >= 2 && PROXY_POOL.length > 1) {
 const prev = getProxy();
 proxyIdx   = (proxyIdx + 1) % PROXY_POOL.length;
 proxyFails = 0;
-log.warn(‘Proxy rotated’, { from: prev.label, to: getProxy().label, reason: r });
+log.warn('Proxy rotated', { from: prev.label, to: getProxy().label, reason: r });
 }
 }
 
@@ -207,28 +207,38 @@ async function fetchFreeProxies(force) {
 const now = Date.now();
 if (!force && freeProxies.length && (now - freeProxyFetched) < 30 * 60 * 1000) return;
 try {
-const r = await axios.get(‘https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt’, { timeout: 10000 });
-freeProxies = […new Set(
-r.data.split(’\n’).map(l => l.trim().replace(/\r$/, ‘’)).filter(l => l && l.includes(’:’) && !l.startsWith(’#’))
+const r = await axios.get('https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt', { timeout: 10000 });
+freeProxies = [...new Set(
+r.data.split('\n').map(l => l.trim().replace(/\r$/, '')).filter(l => l && l.includes(':') && !l.startsWith('#'))
 )].slice(0, 200);
 freeProxyFetched = now;
-log.info(‘Free proxies loaded’, { count: freeProxies.length });
-} catch (e) { log.warn(‘Free proxy fetch failed’, { error: e.message }); }
+log.info('Free proxies loaded', { count: freeProxies.length });
+} catch (e) { log.warn('Free proxy fetch failed', { error: e.message }); }
 }
 
 async function getWorkingFreeProxy() {
 if (workingFreeProxies.length) return workingFreeProxies[Math.floor(Math.random() * workingFreeProxies.length)];
-const candidates = […freeProxies].sort(() => 0.5 - Math.random()).slice(0, 8);
-for (const p of candidates) {
+const candidates = [...freeProxies].sort(() => 0.5 - Math.random()).slice(0, 8);
+// Test concurrently instead of sequentially — much faster
+const results = await Promise.allSettled(candidates.map(async p => {
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 5000);
 try {
-const agent = new HttpsProxyAgent(‘http://’ + p);
-const res   = await axios.get(‘https://www.opensubtitles.org/en’, { httpsAgent: agent, timeout: 5000, headers: { ‘User-Agent’: nextUA() } });
-if (res.status === 200) {
-workingFreeProxies.unshift(p);
-workingFreeProxies = workingFreeProxies.slice(0, 10);
-return p;
-}
-} catch { /* dead */ }
+const agent = new HttpsProxyAgent('http://' + p);
+const res   = await axios.get('https://www.opensubtitles.org/en', {
+httpsAgent: agent, signal: controller.signal,
+timeout: 5000, headers: { 'User-Agent': nextUA() }
+});
+return res.status === 200 ? p : null;
+} catch { return null; }
+finally { clearTimeout(timer); }
+}));
+const working = results
+.filter(r => r.status === 'fulfilled' && r.value)
+.map(r => r.value);
+if (working.length) {
+workingFreeProxies = working.slice(0, 10);
+return workingFreeProxies[0];
 }
 return null;
 }
@@ -237,45 +247,45 @@ return null;
 //  TLS + USER AGENTS
 // =============================================================================
 const TLS = new https.Agent({
-keepAlive: true, keepAliveMsecs: 30000, maxSockets: 20, minVersion: ‘TLSv1.2’,
+keepAlive: true, keepAliveMsecs: 30000, maxSockets: 20, minVersion: 'TLSv1.2',
 honorCipherOrder: true,
-ciphers: ‘TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384’,
+ciphers: 'TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384',
 });
 
 const UA = [
-‘Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36’,
-‘Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36’,
-‘Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0’,
-‘Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36’,
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0',
+'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
 ];
 let uaIdx = 0;
 const nextUA = () => UA[uaIdx++ % UA.length];
 
 const BASE_HDR = {
-‘Accept’                    : ‘text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8’,
-‘Accept-Language’           : ‘en-US,en;q=0.9’,
-‘Accept-Encoding’           : ‘gzip, deflate, br’,
-‘Connection’                : ‘keep-alive’,
-‘Upgrade-Insecure-Requests’ : ‘1’,
-‘Sec-Fetch-Dest’            : ‘document’,
-‘Sec-Fetch-Mode’            : ‘navigate’,
-‘Sec-Fetch-Site’            : ‘none’,
-‘Sec-Fetch-User’            : ‘?1’,
+'Accept'                    : 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+'Accept-Language'           : 'en-US,en;q=0.9',
+'Accept-Encoding'           : 'gzip, deflate, br',
+'Connection'                : 'keep-alive',
+'Upgrade-Insecure-Requests' : '1',
+'Sec-Fetch-Dest'            : 'document',
+'Sec-Fetch-Mode'            : 'navigate',
+'Sec-Fetch-Site'            : 'none',
+'Sec-Fetch-User'            : '?1',
 };
 
 // =============================================================================
 //  COOKIE JAR + SESSION
 // =============================================================================
-const cookieJar = new Map([[‘lang’, ‘en’], [‘oslocale’, ‘en’]]);
+const cookieJar = new Map([['lang', 'en'], ['oslocale', 'en']]);
 
 function getCookieStr() {
-const c = []; cookieJar.forEach((v, k) => c.push(k + ‘=’ + v)); return c.join(’; ‘);
+const c = []; cookieJar.forEach((v, k) => c.push(k + '=' + v)); return c.join('; ');
 }
 function extractCookies(res) {
-const sc = res && res.headers && res.headers[‘set-cookie’];
+const sc = res && res.headers && res.headers['set-cookie'];
 if (!Array.isArray(sc)) return;
 sc.forEach(raw => {
-const pair = raw.split(’;’)[0]; const eq = pair.indexOf(’=’);
+const pair = raw.split(';')[0]; const eq = pair.indexOf('=');
 if (eq > 0) cookieJar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
 });
 }
@@ -286,18 +296,18 @@ let _warmupPromise = null;
 async function warmup() {
 if (_warmupPromise) return _warmupPromise;
 const p = (async () => {
-log.info(‘Session warmup…’);
+log.info('Session warmup…');
 try {
-const res = await axios.get(‘https://www.opensubtitles.org/en’, {
+const res = await axios.get('https://www.opensubtitles.org/en', {
 httpsAgent: TLS, timeout: 12000, maxRedirects: 3,
-headers: Object.assign({}, BASE_HDR, { ‘User-Agent’: nextUA() }),
+headers: Object.assign({}, BASE_HDR, { 'User-Agent': nextUA() }),
 validateStatus: () => true,
 });
 extractCookies(res);
 sessionReady = res.status === 200;
-log.info(sessionReady ? ‘Session ready’ : ‘Session degraded’, { status: res.status });
+log.info(sessionReady ? 'Session ready' : 'Session degraded', { status: res.status });
 } catch (e) {
-log.warn(‘Warmup failed, continuing’, { error: e.message });
+log.warn('Warmup failed, continuing', { error: e.message });
 sessionReady = false;
 } finally {
 if (_warmupPromise === p) _warmupPromise = null;
@@ -310,7 +320,7 @@ return p;
 // =============================================================================
 //  HELPERS
 // =============================================================================
-const LANG_PRIORITY = [‘ml’, ‘en’, ‘hi’, ‘ta’, ‘te’, ‘fr’, ‘es’, ‘de’, ‘ja’, ‘ko’, ‘zh’];
+const LANG_PRIORITY = ['ml', 'en', 'hi', 'ta', 'te', 'fr', 'es', 'de', 'ja', 'ko', 'zh'];
 
 function sortResults(results, preferLang) {
 const pMap = new Map(LANG_PRIORITY.map((l, i) => [l, i]));
@@ -328,33 +338,33 @@ const seen = new Set();
 return arr.filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
 }
 
-function detectML(q)  { return /\bml\b|malayalam|mallu|mala/i.test(q || ‘’); }
+function detectML(q)  { return /\bml\b|malayalam|mallu|mala/i.test(q || ''); }
 
 function safeName(s) {
-return (s || ‘’)
-.replace(/[^a-z0-9.-]/gi, ‘*’)
-.replace(/*+/g, ‘*’)
-.replace(/^*|_$/g, ‘’);
+return (s || '')
+.replace(/[^a-z0-9.-]/gi, '*')
+.replace(/\*+/g, '*')
+.replace(/^\*|\*$/g, '');
 }
 
 function bestFilename(id, meta, cd, zipEntry, titleOverride) {
 // Priority 1: explicit title override (from &title= param or encoded in URL)
 if (titleOverride && titleOverride.trim().length > 1) {
 const t = safeName(titleOverride.trim());
-return /.(srt|ass|ssa|sub|smi)$/i.test(t) ? t : t + ‘.srt’;
+return /\.(srt|ass|ssa|sub|smi)$/i.test(t) ? t : t + '.srt';
 }
 // Priority 2: subfilename from meta cache (real release filename e.g. Fight.Club.1999.BluRay.srt)
 if (meta && meta.subfilename && meta.subfilename.trim().length > 4) {
 const f = safeName(meta.subfilename.trim());
-return /.(srt|ass|ssa|sub|smi)$/i.test(f) ? f : f + ‘.srt’;
+return /\.(srt|ass|ssa|sub|smi)$/i.test(f) ? f : f + '.srt';
 }
 // Priority 3: Content-Disposition header from server
 if (cd) {
-const m = cd.match(/filename[^;=\n]*=([’”]?)([^\n’”]*)\1/i);
+const m = cd.match(/filename[^;=\n]*=([\'"]?)([^\n\'"]*)\1/i);
 if (m && m[2]) {
 let n = m[2].trim();
-if (n.endsWith(’.gz’)) n = n.slice(0, -3);
-if (!/.(srt|ass|ssa|sub|smi)$/i.test(n)) n += ‘.srt’;
+if (n.endsWith('.gz')) n = n.slice(0, -3);
+if (!/\.(srt|ass|ssa|sub|smi)$/i.test(n)) n += '.srt';
 return safeName(path.basename(n));
 }
 }
@@ -364,10 +374,10 @@ if (zipEntry) return safeName(path.basename(zipEntry));
 if (meta && meta.title) {
 const parts = [safeName(meta.title)];
 if (meta.year)  parts.push(meta.year);
-if (meta.lang && meta.lang !== ‘en’) parts.push(meta.lang);
-return parts.filter(Boolean).join(’*’) + ‘.srt’;
+if (meta.lang && meta.lang !== 'en') parts.push(meta.lang);
+return parts.filter(Boolean).join('*') + '.srt';
 }
-return ’subtitle*’ + id + ‘.srt’;
+return 'subtitle*' + id + '.srt';
 }
 
 function isHtml(buf) {
@@ -376,10 +386,10 @@ return /<(html|!doctype|body)/i.test(Buffer.isBuffer(buf) ? buf.subarray(0, 300)
 
 function extractZip(buf, lang) {
 const zip     = new AdmZip(buf);
-const entries = zip.getEntries().filter(e => !e.isDirectory && /.(srt|ass|ssa|sub|smi)$/i.test(e.entryName));
+const entries = zip.getEntries().filter(e => !e.isDirectory && /\.(srt|ass|ssa|sub|smi)$/i.test(e.entryName));
 if (!entries.length) return null;
-entries.forEach(e => { if (e.header.size > CFG.MAX_ZIP_SIZE) throw new Error(‘ZIP entry too large’); });
-const srt  = entries.filter(e => /.srt$/i.test(e.entryName));
+entries.forEach(e => { if (e.header.size > CFG.MAX_ZIP_SIZE) throw new Error('ZIP entry too large'); });
+const srt  = entries.filter(e => /\.srt$/i.test(e.entryName));
 const pool = srt.length ? srt : entries;
 let   best = pool.length > 1 ? pool.reduce((a, b) => b.header.size > a.header.size ? b : a) : pool[0];
 if (lang) { const lm = pool.find(e => e.entryName.toLowerCase().includes(lang)); if (lm) best = lm; }
@@ -389,15 +399,15 @@ return { buffer: best.getData(), name: best.entryName };
 function normalizeResult(r) {
 const feat = Object.assign({ hd: false, trusted: false, hearing_impaired: false }, r.features || {});
 const obj = {
-id       : String(r.id || ‘’),
-title    : r.title || ‘’,
+id       : String(r.id || ''),
+title    : r.title || '',
 year     : r.year  || null,
-lang     : (r.lang || ‘en’).toLowerCase(),
-language : r.langName || r.lang || ‘’,
+lang     : (r.lang || 'en').toLowerCase(),
+language : r.langName || r.lang || '',
 downloads: r.downloads || 0,
-filename : r.subfilename || ‘’,
-type     : r.type   || ‘movie’,
-source   : r.source || ‘unknown’,
+filename : r.subfilename || '',
+type     : r.type   || 'movie',
+source   : r.source || 'unknown',
 hd       : feat.hd       || false,
 trusted  : feat.trusted  || false,
 hi       : feat.hearing_impaired || false,
@@ -413,41 +423,41 @@ return obj;
 // =============================================================================
 async function searchOfficial(query, lang) {
 const token = await getOsToken();
-if (!token) throw new Error(‘No OS API token’);
+if (!token) throw new Error('No OS API token');
 
 const params = { query, per_page: 60 };
-if (lang && lang !== ‘all’) params.languages = lang;
+if (lang && lang !== 'all') params.languages = lang;
 
-const res = await axios.get(‘https://api.opensubtitles.com/api/v1/subtitles’, {
+const res = await axios.get('https://api.opensubtitles.com/api/v1/subtitles', {
 params,
 headers: {
-‘Api-Key’       : CFG.OS_API_KEY,
-‘Authorization’ : ’Bearer ’ + token,
-‘User-Agent’    : CFG.OS_UA,
-‘Content-Type’  : ‘application/json’,
+'Api-Key'       : CFG.OS_API_KEY,
+'Authorization' : 'Bearer ' + token,
+'User-Agent'    : CFG.OS_UA,
+'Content-Type'  : 'application/json',
 },
 timeout: 15000,
 validateStatus: () => true,
 });
 
-if (res.status === 401) { osToken = ‘’; throw new Error(‘OS token expired’); }
-if (res.status === 429) throw new Error(‘OS API rate limited’);
-if (res.status !== 200) throw new Error(’OS API HTTP ’ + res.status);
+if (res.status === 401) { osToken = ''; throw new Error('OS token expired'); }
+if (res.status === 429) throw new Error('OS API rate limited');
+if (res.status !== 200) throw new Error('OS API HTTP ' + res.status);
 
 const items = (res.data && res.data.data) || [];
 
 const results = items.map(item => {
 const attrs = item.attributes || {};
 const files = (attrs.files || [])[0] || {};
-const id    = String(files.file_id || item.id || ‘’);
+const id    = String(files.file_id || item.id || '');
 if (!id) return null;
-const slang = (attrs.language || lang || ‘en’).toLowerCase();
+const slang = (attrs.language || lang || 'en').toLowerCase();
 const fd    = attrs.feature_details || {};
 const meta  = {
-title      : attrs.movie_name || fd.movie_name || ‘’,
+title      : attrs.movie_name || fd.movie_name || '',
 year       : fd.year ? String(fd.year) : null,
 lang       : slang,
-subfilename: files.file_name || ‘’,
+subfilename: files.file_name || '',
 };
 metaCache.set(id, meta);
 return normalizeResult({
@@ -458,13 +468,13 @@ lang        : slang,
 langName    : attrs.language || slang,
 downloads   : attrs.download_count || 0,
 subfilename : meta.subfilename,
-type        : fd.feature_type === ‘Episode’ ? ‘series’ : ‘movie’,
-source      : ‘official’,
+type        : fd.feature_type === 'Episode' ? 'series' : 'movie',
+source      : 'official',
 features    : { hd: attrs.hd || false, trusted: attrs.from_trusted || false, hearing_impaired: attrs.hearing_impaired || false },
 });
 }).filter(Boolean);
 
-log.info(‘S0 (official) OK’, { count: results.length, query });
+log.info('S0 (official) OK', { count: results.length, query });
 return results;
 }
 
@@ -472,13 +482,13 @@ return results;
 //  SOURCE 1 — simpleXML SCRAPING  (proxy rotation)
 // =============================================================================
 async function searchSimpleXML(query) {
-const url = ‘https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-’ + encodeURIComponent(query) + ‘/simplexml’;
+const url = 'https://www.opensubtitles.org/en/search/sublanguageid-all/moviename-' + encodeURIComponent(query) + '/simplexml';
 
 const tryReq = async (agent) => {
 const res = await axios.get(url, {
 httpsAgent    : agent,
 timeout       : CFG.REQ_TIMEOUT,
-headers       : Object.assign({}, BASE_HDR, { ‘User-Agent’: nextUA(), ‘Cookie’: getCookieStr() }),
+headers       : Object.assign({}, BASE_HDR, { 'User-Agent': nextUA(), 'Cookie': getCookieStr() }),
 maxRedirects  : 3,
 validateStatus: () => true,
 });
@@ -490,7 +500,7 @@ let res = null;
 
 if (PROXY_POOL.length) {
 for (let i = 0; i < Math.min(2, PROXY_POOL.length); i++) {
-try { res = await tryReq(getProxy().agent); if (res.status === 200) { proxyOK(); break; } proxyFail(’HTTP ’ + res.status); res = null; }
+try { res = await tryReq(getProxy().agent); if (res.status === 200) { proxyOK(); break; } proxyFail('HTTP ' + res.status); res = null; }
 catch (e) { proxyFail(e.message); res = null; }
 }
 }
@@ -498,39 +508,39 @@ if (!res || res.status !== 200) { try { res = await tryReq(TLS); } catch { res =
 if (!res || res.status !== 200) {
 const fp = await getWorkingFreeProxy();
 if (fp) {
-try { res = await tryReq(new HttpsProxyAgent(‘http://’ + fp)); }
+try { res = await tryReq(new HttpsProxyAgent('http://' + fp)); }
 catch { workingFreeProxies = workingFreeProxies.filter(p => p !== fp); res = null; }
 }
 }
 
-if (!res || res.status !== 200) throw new Error(’simpleXML HTTP ’ + (res ? res.status : ‘no response’));
+if (!res || res.status !== 200) throw new Error('simpleXML HTTP ' + (res ? res.status : 'no response'));
 
 const $ = cheerio.load(res.data, { xmlMode: true });
 const results = [];
-$(‘subtitle’).each((_, el) => {
+$('subtitle').each((_, el) => {
 const $e = $(el);
-const rawTitle = ($e.find(‘moviename’).text() || $e.find(‘releasename’).text() || ‘’).replace(/\s+/g, ’ ’).trim();
-const id       = $e.find(‘idsubtitle’).text().trim();
-const subfile  = $e.find(‘subfilename’).text().trim();
-const slang    = $e.find(‘iso639’).text().trim();
+const rawTitle = ($e.find('moviename').text() || $e.find('releasename').text() || '').replace(/\s+/g, ' ').trim();
+const id       = $e.find('idsubtitle').text().trim();
+const subfile  = $e.find('subfilename').text().trim();
+const slang    = $e.find('iso639').text().trim();
 if (!id || !rawTitle) return;
 const yearMatch = rawTitle.match(/(((19|20)\d{2}))/);
 const year  = yearMatch ? yearMatch[1] : null;
-const title = rawTitle.replace(/\s*((19|20)\d{2})$/, ‘’).trim();
+const title = rawTitle.replace(/\s*((19|20)\d{2})$/, '').trim();
 metaCache.set(id, { title, year, lang: slang, subfilename: subfile });
 results.push(normalizeResult({
 id, title, year,
 lang        : slang,
-langName    : $e.find(‘language’).text().trim(),
-downloads   : parseInt($e.find(‘subdownloads’).text(), 10) || 0,
+langName    : $e.find('language').text().trim(),
+downloads   : parseInt($e.find('subdownloads').text(), 10) || 0,
 subfilename : subfile,
-type        : $e.find(‘moviekind’).text() === ‘episode’ ? ‘series’ : ‘movie’,
-source      : ‘opensubtitles’,
-features    : { hd: $e.find(‘subhd’).text() === ‘1’, trusted: $e.find(‘subtrusted’).text() === ‘1’, hearing_impaired: $e.find(‘subhearingimpaired’).text() === ‘1’ },
+type        : $e.find('moviekind').text() === 'episode' ? 'series' : 'movie',
+source      : 'opensubtitles',
+features    : { hd: $e.find('subhd').text() === '1', trusted: $e.find('subtrusted').text() === '1', hearing_impaired: $e.find('subhearingimpaired').text() === '1' },
 }));
 });
 
-log.info(‘S1 (simpleXML) OK’, { count: results.length, query });
+log.info('S1 (simpleXML) OK', { count: results.length, query });
 return results;
 }
 
@@ -538,9 +548,9 @@ return results;
 //  SOURCE 2 — rest.opensubtitles.org  (different domain, different CF rules)
 // =============================================================================
 async function searchOldRest(query, lang) {
-const langCode = (lang && lang !== ‘all’) ? lang : ‘all’;
-const url      = ‘https://rest.opensubtitles.org/search/sublanguageid-’ + langCode + ‘/query-’ + encodeURIComponent(query);
-const headers  = { ‘User-Agent’: ‘TemporaryUserAgent’, ‘X-User-Agent’: ‘TemporaryUserAgent’, ‘Accept’: ‘application/json’, ‘Accept-Language’: ‘en-US,en;q=0.9’ };
+const langCode = (lang && lang !== 'all') ? lang : 'all';
+const url      = 'https://rest.opensubtitles.org/search/sublanguageid-' + langCode + '/query-' + encodeURIComponent(query);
+const headers  = { 'User-Agent': 'TemporaryUserAgent', 'X-User-Agent': 'TemporaryUserAgent', 'Accept': 'application/json', 'Accept-Language': 'en-US,en;q=0.9' };
 
 let res = null;
 try { res = await axios.get(url, { headers, httpsAgent: TLS, timeout: 15000, maxRedirects: 3, validateStatus: () => true }); } catch { res = null; }
@@ -550,28 +560,28 @@ try { res = await axios.get(url, { headers, httpsAgent: getProxy().agent, timeou
 catch { res = null; }
 }
 
-if (!res || res.status !== 200 || !Array.isArray(res.data)) throw new Error(’OldREST HTTP ’ + (res ? res.status : ‘no response’));
+if (!res || res.status !== 200 || !Array.isArray(res.data)) throw new Error('OldREST HTTP ' + (res ? res.status : 'no response'));
 
 const results = res.data.map(item => {
-const id = item.IDSubtitleFile || item.IDSubtitle || ‘’;
+const id = item.IDSubtitleFile || item.IDSubtitle || '';
 if (!id) return null;
-const slang = (item.SubLanguageID || ‘en’).toLowerCase();
-metaCache.set(id, { title: item.MovieName || query, year: item.MovieYear || null, lang: slang, subfilename: item.SubFileName || ‘’ });
+const slang = (item.SubLanguageID || 'en').toLowerCase();
+metaCache.set(id, { title: item.MovieName || query, year: item.MovieYear || null, lang: slang, subfilename: item.SubFileName || '' });
 return normalizeResult({
 id,
 title       : item.MovieName || query,
 year        : item.MovieYear || null,
 lang        : slang,
 langName    : item.LanguageName || slang,
-downloads   : parseInt(item.SubDownloadsCnt || ‘0’, 10) || 0,
-subfilename : item.SubFileName || ‘’,
-type        : item.MovieKind === ‘episode’ ? ‘series’ : ‘movie’,
-source      : ‘opensubtitles-rest’,
-features    : { hd: item.SubHD === ‘1’, trusted: item.SubFromTrusted === ‘1’, hearing_impaired: item.SubHearingImpaired === ‘1’ },
+downloads   : parseInt(item.SubDownloadsCnt || '0', 10) || 0,
+subfilename : item.SubFileName || '',
+type        : item.MovieKind === 'episode' ? 'series' : 'movie',
+source      : 'opensubtitles-rest',
+features    : { hd: item.SubHD === '1', trusted: item.SubFromTrusted === '1', hearing_impaired: item.SubHearingImpaired === '1' },
 });
 }).filter(Boolean);
 
-log.info(‘S2 (OldREST) OK’, { count: results.length, query });
+log.info('S2 (OldREST) OK', { count: results.length, query });
 return results;
 }
 
@@ -579,78 +589,78 @@ return results;
 //  SOURCE 3 — WYZIE SUBS  (zero CF, direct download URLs)
 // =============================================================================
 async function getImdbId(title, year) {
-const key    = ‘imdb:’ + title.toLowerCase() + (year ? ‘:’ + year : ‘’);
+const key    = 'imdb:' + title.toLowerCase() + (year ? ':' + year : '');
 const cached = imdbCache.get(key);
 if (cached) return cached;
 
 // OMDB
 try {
-const params = { t: title, type: ‘movie’, r: ‘json’ };
+const params = { t: title, type: 'movie', r: 'json' };
 if (year) params.y = year;
 if (CFG.OMDB_KEY) params.apikey = CFG.OMDB_KEY;
-const res = await axios.get(‘https://www.omdbapi.com/’, { params, timeout: 8000 });
-if (res.data && res.data.Response === ‘True’ && res.data.imdbID) {
+const res = await axios.get('https://www.omdbapi.com/', { params, timeout: 8000 });
+if (res.data && res.data.Response === 'True' && res.data.imdbID) {
 imdbCache.set(key, res.data.imdbID); return res.data.imdbID;
 }
-} catch (e) { log.debug(‘OMDB failed’, { error: e.message }); }
+} catch (e) { log.debug('OMDB failed', { error: e.message }); }
 
 // TMDB fallback
 if (CFG.TMDB_KEY) {
 try {
-const res = await axios.get(‘https://api.themoviedb.org/3/search/movie’, {
+const res = await axios.get('https://api.themoviedb.org/3/search/movie', {
 params: { api_key: CFG.TMDB_KEY, query: title, year: year || undefined }, timeout: 8000,
 });
 const r0 = res.data && res.data.results && res.data.results[0];
 if (r0 && r0.id) {
-const ext = await axios.get(‘https://api.themoviedb.org/3/movie/’ + r0.id + ‘/external_ids’, { params: { api_key: CFG.TMDB_KEY }, timeout: 8000 });
+const ext = await axios.get('https://api.themoviedb.org/3/movie/' + r0.id + '/external_ids', { params: { api_key: CFG.TMDB_KEY }, timeout: 8000 });
 if (ext.data && ext.data.imdb_id) { imdbCache.set(key, ext.data.imdb_id); return ext.data.imdb_id; }
 }
-} catch (e) { log.debug(‘TMDB failed’, { error: e.message }); }
+} catch (e) { log.debug('TMDB failed', { error: e.message }); }
 }
 
 return null;
 }
 
 async function searchWyzie(query, lang) {
-if (!CFG.WYZIE_KEY) throw new Error(‘WYZIE_KEY not configured’);
+if (!CFG.WYZIE_KEY) throw new Error('WYZIE_KEY not configured');
 const imdbId = await getImdbId(query);
-if (!imdbId) throw new Error(’Could not resolve IMDB ID for Wyzie: ’ + query);
+if (!imdbId) throw new Error('Could not resolve IMDB ID for Wyzie: ' + query);
 
-const params = { id: imdbId, source: ‘all’, format: ‘srt,ass,sub’, key: CFG.WYZIE_KEY };
-if (lang && lang !== ‘all’) params.language = lang;
+const params = { id: imdbId, source: 'all', format: 'srt,ass,sub', key: CFG.WYZIE_KEY };
+if (lang && lang !== 'all') params.language = lang;
 
-const res = await axios.get(‘https://sub.wyzie.io/search’, {
+const res = await axios.get('https://sub.wyzie.io/search', {
 params, timeout: 15000,
-headers: { ‘User-Agent’: nextUA(), ‘Accept’: ‘application/json’ },
+headers: { 'User-Agent': nextUA(), 'Accept': 'application/json' },
 validateStatus: () => true,
 });
 
-if (res.status === 401) throw new Error(‘Wyzie invalid key’);
-if (res.status === 429) throw new Error(‘Wyzie rate limited’);
-if (res.status !== 200) throw new Error(’Wyzie HTTP ’ + res.status);
+if (res.status === 401) throw new Error('Wyzie invalid key');
+if (res.status === 429) throw new Error('Wyzie rate limited');
+if (res.status !== 200) throw new Error('Wyzie HTTP ' + res.status);
 
 const data = Array.isArray(res.data) ? res.data : [];
 const results = data.map(item => {
-const id = String(item.id || ‘’);
+const id = String(item.id || '');
 if (!id || !item.url) return null;
-const slang = (item.language || ‘en’).toLowerCase().slice(0, 2);
-metaCache.set(id, { title: item.media || query, lang: slang, subfilename: item.fileName || ‘’, directUrl: item.url });
+const slang = (item.language || 'en').toLowerCase().slice(0, 2);
+metaCache.set(id, { title: item.media || query, lang: slang, subfilename: item.fileName || '', directUrl: item.url });
 return normalizeResult({
 id,
 title       : item.media || query,
 lang        : slang,
 langName    : item.display || slang,
 downloads   : item.downloadCount || 0,
-subfilename : item.fileName || ‘’,
-release     : item.release || ‘’,
-type        : ‘movie’,
-source      : ‘wyzie’,
+subfilename : item.fileName || '',
+release     : item.release || '',
+type        : 'movie',
+source      : 'wyzie',
 directUrl   : item.url,
 features    : { hearing_impaired: item.isHearingImpaired || false },
 });
 }).filter(Boolean);
 
-log.info(‘S3 (Wyzie) OK’, { count: results.length, query, imdbId });
+log.info('S3 (Wyzie) OK', { count: results.length, query, imdbId });
 return results;
 }
 
@@ -658,7 +668,7 @@ return results;
 //  UNIFIED SEARCH — 4 sources + smart year-variant retry
 // =============================================================================
 async function unifiedSearch(query, lang, type) {
-const ck     = ‘search:’ + query + ‘:’ + (lang || ‘all’) + ‘:’ + (type || ‘all’);
+const ck     = 'search:' + query + ':' + (lang || 'all') + ':' + (type || 'all');
 const cached = searchCache.get(ck);
 if (cached) return Object.assign({}, cached, { fromCache: true });
 if (inFlight.has(ck)) return inFlight.get(ck);
@@ -668,10 +678,9 @@ const promise = (async () => {
 const yr = new Date().getFullYear();
 const variants = [query];
 if (!/\b(19|20)\d{2}\b/.test(query)) {
-variants.push(query + ’ ’ + (yr - 1), query + ’ ’ + yr, query + ’ ’ + (yr - 2));
+variants.push(query + ' ' + (yr - 1), query + ' ' + yr, query + ' ' + (yr - 2));
 }
 
-```
 let results = [], source = '';
 const errors = [];
 
@@ -712,8 +721,6 @@ const payload = { query, lang, total: results.length, source, fromCache: false, 
 searchCache.set(ck, payload);
 log.info('Search done', { query, total: results.length, source });
 return payload;
-```
-
 })();
 
 inFlight.set(ck, promise);
@@ -725,7 +732,7 @@ return promise;
 //  DOWNLOAD — 4 methods
 // =============================================================================
 async function downloadSub(id, titleOverride) {
-const ck     = ‘dl:’ + id;
+const ck     = 'dl:' + id;
 const cached = dlCache.get(ck);
 if (cached) return cached;
 
@@ -735,24 +742,24 @@ const meta = metaCache.get(id) || null;
 if (osToken || (await getOsToken())) {
 if (osQuotaUsed < osQuotaMax) {
 try {
-const dlRes = await axios.post(‘https://api.opensubtitles.com/api/v1/download’,
+const dlRes = await axios.post('https://api.opensubtitles.com/api/v1/download',
 { file_id: parseInt(id, 10) },
-{ headers: { ‘Api-Key’: CFG.OS_API_KEY, ‘Authorization’: ’Bearer ’ + osToken, ‘User-Agent’: CFG.OS_UA, ‘Content-Type’: ‘application/json’ }, timeout: 15000 }
+{ headers: { 'Api-Key': CFG.OS_API_KEY, 'Authorization': 'Bearer ' + osToken, 'User-Agent': CFG.OS_UA, 'Content-Type': 'application/json' }, timeout: 15000 }
 );
 if (dlRes.data && dlRes.data.link) {
 osQuotaUsed++;
-const fileRes = await axios.get(dlRes.data.link, { responseType: ‘arraybuffer’, timeout: 20000, headers: { ‘User-Agent’: nextUA() } });
+const fileRes = await axios.get(dlRes.data.link, { responseType: 'arraybuffer', timeout: 20000, headers: { 'User-Agent': nextUA() } });
 let buf = Buffer.from(fileRes.data);
 if (buf[0] === 0x1f && buf[1] === 0x8b) { try { buf = zlib.gunzipSync(buf); } catch {} }
 if (!isHtml(buf) && buf.length > 50) {
-const fn = bestFilename(id, meta, ‘’, null, titleOverride || (dlRes.data.file_name ? safeName(dlRes.data.file_name) : ‘’));
+const fn = bestFilename(id, meta, '', null, titleOverride || (dlRes.data.file_name ? safeName(dlRes.data.file_name) : ''));
 const result = { buffer: buf, filename: fn };
 dlCache.set(ck, result);
-log.info(‘Download M0 (official)’, { id, filename: fn, quota: osQuotaUsed + ‘/’ + osQuotaMax });
+log.info('Download M0 (official)', { id, filename: fn, quota: osQuotaUsed + '/' + osQuotaMax });
 return result;
 }
 }
-} catch (e) { log.warn(‘M0 official DL failed’, { error: e.message }); }
+} catch (e) { log.warn('M0 official DL failed', { error: e.message }); }
 }
 }
 
@@ -760,38 +767,38 @@ return result;
 const directUrl = meta && meta.directUrl ? meta.directUrl : null;
 if (directUrl) {
 try {
-const res = await axios.get(directUrl, { responseType: ‘arraybuffer’, timeout: 20000, headers: { ‘User-Agent’: nextUA() }, validateStatus: () => true });
+const res = await axios.get(directUrl, { responseType: 'arraybuffer', timeout: 20000, headers: { 'User-Agent': nextUA() }, validateStatus: () => true });
 if (res.status === 200) {
 let buf = Buffer.from(res.data);
 if (buf[0] === 0x1f && buf[1] === 0x8b) { try { buf = zlib.gunzipSync(buf); } catch {} }
 if (!isHtml(buf) && buf.length > 50) {
-const fn = bestFilename(id, meta, ‘’, null, titleOverride);
+const fn = bestFilename(id, meta, '', null, titleOverride);
 const result = { buffer: buf, filename: fn };
 dlCache.set(ck, result);
-log.info(‘Download M1 (wyzie direct)’, { id, filename: fn });
+log.info('Download M1 (wyzie direct)', { id, filename: fn });
 return result;
 }
 }
-} catch (e) { log.warn(‘M1 wyzie DL failed’, { error: e.message }); }
+} catch (e) { log.warn('M1 wyzie DL failed', { error: e.message }); }
 }
 
 // M2 + M3: scraper with proxy rotation
 const dlUrls = [
-‘https://dl.opensubtitles.org/en/download/sub/’ + id,
-‘https://www.opensubtitles.org/en/subtitleserve/sub/’ + id,
+'https://dl.opensubtitles.org/en/download/sub/' + id,
+'https://www.opensubtitles.org/en/subtitleserve/sub/' + id,
 ];
 
 for (const url of dlUrls) {
 const agents = [];
 const proxy  = getProxy();
-if (proxy) agents.push({ agent: proxy.agent, label: proxy.label });
-agents.push({ agent: TLS, label: ‘direct’ });
+if (proxy) agents.push({ agent: proxy.agent, label: proxy.label, proxy: null });
+agents.push({ agent: TLS, label: 'direct', proxy: null });
 if (workingFreeProxies.length) {
-try { agents.push({ agent: new HttpsProxyAgent(‘http://’ + workingFreeProxies[0]), label: ‘free’ }); } catch {}
+const fp = workingFreeProxies[0];
+try { agents.push({ agent: new HttpsProxyAgent('http://' + fp), label: 'free', proxy: fp }); } catch {}
 }
 
-```
-for (const { agent, label } of agents) {
+for (const { agent, label, proxy } of agents) {
   try {
     const res = await axios.get(url, {
       httpsAgent   : agent,
@@ -820,37 +827,41 @@ for (const { agent, label } of agents) {
     if (label !== 'direct') proxyOK();
     log.info('Download M2/M3 (scraper)', { id, filename: fn, via: label });
     return result;
-  } catch (e) { if (label !== 'direct') proxyFail(e.message); }
+  } catch (e) {
+    if (label !== 'direct') proxyFail(e.message);
+    // Remove dead free proxy immediately
+    if (label === 'free' && proxy) {
+      workingFreeProxies = workingFreeProxies.filter(p => p !== proxy);
+    }
+  }
 }
-```
-
 }
 
-throw new Error(‘All download methods failed for id=’ + id);
+throw new Error('All download methods failed for id=' + id);
 }
 
 // =============================================================================
 //  MIDDLEWARE
 // =============================================================================
 app.use(compression());
-app.use(cors({ origin: ‘*’, methods: [‘GET’, ‘OPTIONS’] }));
-app.use(express.json({ limit: ‘512kb’ }));
+app.use(cors({ origin: '*', methods: ['GET', 'OPTIONS'] }));
+app.use(express.json({ limit: '512kb' }));
 
 app.use((req, res, next) => {
-res.setHeader(‘X-Content-Type-Options’, ‘nosniff’);
-res.setHeader(‘X-Frame-Options’, ‘DENY’);
-res.setHeader(‘X-Powered-By’, ‘VOID CINEMA’);
+res.setHeader('X-Content-Type-Options', 'nosniff');
+res.setHeader('X-Frame-Options', 'DENY');
+res.setHeader('X-Powered-By', 'VOID CINEMA');
 next();
 });
 
 // X-Response-Time — intercept res.end, safe, no ERR_HTTP_HEADERS_SENT
 app.use((req, res, next) => {
-req.rid    = req.headers[‘x-request-id’] || randomUUID();
+req.rid    = req.headers['x-request-id'] || randomUUID();
 req._start = Date.now();
-res.setHeader(‘X-Request-ID’, req.rid);
+res.setHeader('X-Request-ID', req.rid);
 const orig = res.end.bind(res);
 res.end = function(chunk, encoding, cb) {
-if (!res.headersSent) { try { res.setHeader(‘X-Response-Time’, (Date.now() - req._start) + ‘ms’); } catch (e) {} }
+if (!res.headersSent) { try { res.setHeader('X-Response-Time', (Date.now() - req._start) + 'ms'); } catch (e) {} }
 return orig(chunk, encoding, cb);
 };
 next();
@@ -861,25 +872,24 @@ windowMs: CFG.RATE_WINDOW_MS, max: CFG.RATE_MAX,
 standardHeaders: true, legacyHeaders: false,
 keyGenerator: req => req.rid || req.ip,
 handler: (req, res) => {
-res.setHeader(‘Retry-After’, Math.ceil(CFG.RATE_WINDOW_MS / 1000));
-res.status(429).json({ ok: false, error: ‘Rate limit exceeded.’, retryAfterSeconds: Math.ceil(CFG.RATE_WINDOW_MS / 1000) });
+res.setHeader('Retry-After', Math.ceil(CFG.RATE_WINDOW_MS / 1000));
+res.status(429).json({ ok: false, error: 'Rate limit exceeded.', retryAfterSeconds: Math.ceil(CFG.RATE_WINDOW_MS / 1000) });
 },
 });
 
 // =============================================================================
 //  ROUTES
 // =============================================================================
-app.get(’/search’, limiter, async (req, res) => {
+app.get('/search', limiter, async (req, res) => {
 let { q, lang, type } = req.query;
-if (!q) return res.status(400).json({ ok: false, error: ‘Missing q’ });
+if (!q) return res.status(400).json({ ok: false, error: 'Missing q' });
 q = q.trim().slice(0, 200);
-if (!lang && detectML(q)) lang = ‘ml’;
+if (!lang && detectML(q)) lang = 'ml';
 try {
 const t0   = Date.now();
 const data = await unifiedSearch(q, lang || null, type || null);
 const ms   = Date.now() - req._start;
 
-```
 // Attach download path to each result
 const results = data.results.map(r => {
   const out = Object.assign({}, r);
@@ -904,59 +914,58 @@ const etag = '"' + Buffer.from(q + (lang || '') + data.total).toString('base64')
 if (req.headers['if-none-match'] === etag) return res.status(304).end();
 res.setHeader('ETag', etag);
 return res.json(payload);
-```
 
 } catch (e) {
-log.error(‘Search error’, { error: e.message, q, rid: req.rid });
-return res.status(500).json({ ok: false, error: ‘Search failed.’, detail: e.message });
+log.error('Search error', { error: e.message, q, rid: req.rid });
+return res.status(500).json({ ok: false, error: 'Search failed.', detail: e.message });
 }
 });
 
-app.get(’/download’, limiter, async (req, res) => {
+app.get('/download', limiter, async (req, res) => {
 const { id, title } = req.query;
-if (!id || !/^\d{1,20}$/.test(id.trim())) return res.status(400).json({ ok: false, error: ‘Invalid or missing id’ });
+if (!id || !/^\d{1,20}$/.test(id.trim())) return res.status(400).json({ ok: false, error: 'Invalid or missing id' });
 try {
 const result = await downloadSub(id.trim(), title || null);
-res.setHeader(‘Content-Type’, ‘text/plain; charset=utf-8’);
-res.setHeader(‘Content-Disposition’, ‘attachment; filename=”’ + result.filename + ‘”’);
-res.setHeader(‘Content-Length’, result.buffer.length);
+res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+res.setHeader('Content-Disposition', 'attachment; filename="' + result.filename + '"');
+res.setHeader('Content-Length', result.buffer.length);
 return res.send(result.buffer);
 } catch (e) {
-log.error(‘Download error’, { error: e.message, id, rid: req.rid });
-return res.status(500).json({ ok: false, error: ‘Download failed.’, detail: e.message });
+log.error('Download error', { error: e.message, id, rid: req.rid });
+return res.status(500).json({ ok: false, error: 'Download failed.', detail: e.message });
 }
 });
 
-app.get(’/languages’, limiter, async (req, res) => {
+app.get('/languages', limiter, async (req, res) => {
 const { q } = req.query;
-if (!q) return res.status(400).json({ ok: false, error: ‘Missing q’ });
+if (!q) return res.status(400).json({ ok: false, error: 'Missing q' });
 try {
 const data  = await unifiedSearch(q.trim(), null, null);
-const langs = […new Set(data.results.map(r => r.lang))].sort();
+const langs = [...new Set(data.results.map(r => r.lang))].sort();
 return res.json({ ok: true, query: q, total: langs.length, languages: langs });
 } catch (e) { return res.status(500).json({ ok: false, error: e.message }); }
 });
 
-app.get(’/stats’, (req, res) => {
+app.get('/stats', (req, res) => {
 const mem = process.memoryUsage();
 const up  = process.uptime();
-const fmt = n => String(Math.floor(n)).padStart(2, ‘0’);
+const fmt = n => String(Math.floor(n)).padStart(2, '0');
 return res.json({
 ok              : true,
-version         : ‘FINAL BOSS’,
+version         : 'FINAL BOSS',
 platform        : PLATFORM,
 uptime          : up,
-uptimeFormatted : fmt(up / 3600) + ‘:’ + fmt((up % 3600) / 60) + ‘:’ + fmt(up % 60),
+uptimeFormatted : fmt(up / 3600) + ':' + fmt((up % 3600) / 60) + ':' + fmt(up % 60),
 sessionReady,
 cookieCount     : cookieJar.size,
 sources         : {
-s0 : ‘official api.opensubtitles.com (quota: ’ + osQuotaUsed + ‘/’ + osQuotaMax + ‘)’,
-s1 : ‘opensubtitles simpleXML (main scraper)’,
-s2 : ‘rest.opensubtitles.org (old REST)’,
-s3 : CFG.WYZIE_KEY ? ‘wyzie subs (ready)’ : ‘wyzie subs (add WYZIE_KEY)’,
+s0 : 'official api.opensubtitles.com (quota: ' + osQuotaUsed + '/' + osQuotaMax + ')',
+s1 : 'opensubtitles simpleXML (main scraper)',
+s2 : 'rest.opensubtitles.org (old REST)',
+s3 : CFG.WYZIE_KEY ? 'wyzie subs (ready)' : 'wyzie subs (add WYZIE_KEY)',
 },
 proxies         : { env: PROXY_POOL.length, freeTotal: freeProxies.length, freeWorking: workingFreeProxies.length },
-memory          : { rss: (mem.rss / 1024 / 1024).toFixed(2) + ’ MB’, heapUsed: (mem.heapUsed / 1024 / 1024).toFixed(2) + ’ MB’ },
+memory          : { rss: (mem.rss / 1024 / 1024).toFixed(2) + ' MB', heapUsed: (mem.heapUsed / 1024 / 1024).toFixed(2) + ' MB' },
 cache           : {
 search   : { keys: searchCache.getStats().keys, hits: searchCache.getStats().hits },
 download : { keys: dlCache.getStats().keys },
@@ -965,13 +974,13 @@ meta     : { keys: metaCache.getStats().keys },
 });
 });
 
-app.get(’/health’, async (req, res) => {
+app.get('/health', async (req, res) => {
 let osReachable = false;
-try { await axios.head(‘https://www.opensubtitles.org’, { timeout: 5000 }); osReachable = true; } catch {}
+try { await axios.head('https://www.opensubtitles.org', { timeout: 5000 }); osReachable = true; } catch {}
 const ok = !!osToken || osReachable || !!CFG.WYZIE_KEY;
 return res.status(ok ? 200 : 503).json({
 ok        : ok,
-status    : ok ? ‘healthy’ : ‘degraded’,
+status    : ok ? 'healthy' : 'degraded',
 session   : sessionReady,
 reachable : osReachable,
 sources   : { official: !!osToken, wyzie: !!CFG.WYZIE_KEY, proxies: PROXY_POOL.length },
@@ -979,22 +988,22 @@ timestamp : new Date().toISOString(),
 });
 });
 
-app.get(’/ping’,  (req, res) => res.send(‘pong’));
+app.get('/ping',  (req, res) => res.send('pong'));
 
-app.get(’/debug’, (req, res) => res.json({
+app.get('/debug', (req, res) => res.json({
 platform: PLATFORM, baseUrl: BASE_URL,
 proxyCount: PROXY_POOL.length, freeProxies: freeProxies.length,
 sessionReady, officialApi: !!osToken,
-osQuota: osQuotaUsed + ‘/’ + osQuotaMax,
+osQuota: osQuotaUsed + '/' + osQuotaMax,
 wyzie: !!CFG.WYZIE_KEY,
 uptime: process.uptime(),
 }));
 
-app.get(’/subtitle’, (req, res) => {
+app.get('/subtitle', (req, res) => {
 const { action, id, title } = req.query;
-if (action === ‘search’) { const rest = Object.assign({}, req.query); delete rest.action; return res.redirect(302, ‘/search?’ + new URLSearchParams(rest).toString()); }
-if (action === ‘download’) return res.redirect(302, ‘/download?id=’ + id + (title ? ‘&title=’ + encodeURIComponent(title) : ‘’));
-return res.status(400).json({ ok: false, error: ‘Invalid action’ });
+if (action === 'search') { const rest = Object.assign({}, req.query); delete rest.action; return res.redirect(302, '/search?' + new URLSearchParams(rest).toString()); }
+if (action === 'download') return res.redirect(302, '/download?id=' + id + (title ? '&title=' + encodeURIComponent(title) : ''));
+return res.status(400).json({ ok: false, error: 'Invalid action' });
 });
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
@@ -1010,47 +1019,47 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* ── THEMES ─────────────────────────────────────── */
-[data-theme=“dark”] {
-–bg:    #000000;
-–s0:    #050505;
-–s1:    #090909;
-–line:  #141414;
-–dim:   #222;
-–muted: #3a3a3a;
-–body:  #666;
-–text:  #999;
-–off:   #ccc;
-–black: #f0f0f0;
-–white: #f0f0f0;
-–gold:  #b8965a;
-–gold2: #d4aa72;
-–nav-bg: rgba(0,0,0,.93);
-–out-bg: #050505;
+[data-theme="dark"] {
+--bg:    #000000;
+--s0:    #050505;
+--s1:    #090909;
+--line:  #141414;
+--dim:   #222;
+--muted: #3a3a3a;
+--body:  #666;
+--text:  #999;
+--off:   #ccc;
+--black: #f0f0f0;
+--white: #f0f0f0;
+--gold:  #b8965a;
+--gold2: #d4aa72;
+--nav-bg: rgba(0,0,0,.93);
+--out-bg: #050505;
 }
-[data-theme=“light”] {
-–bg:    #f5f2ed;
-–s0:    #efebe4;
-–s1:    #e8e3db;
-–line:  #d8d2c8;
-–dim:   #bfb8ac;
-–muted: #9a9288;
-–body:  #6e6660;
-–text:  #3a3530;
-–off:   #3a3530;
-–black: #1a1612;
-–white: #1a1612;
-–gold:  #8a6a2e;
-–gold2: #b08840;
-–nav-bg: rgba(245,242,237,.93);
-–out-bg: #e8e3db;
+[data-theme="light"] {
+--bg:    #f5f2ed;
+--s0:    #efebe4;
+--s1:    #e8e3db;
+--line:  #d8d2c8;
+--dim:   #bfb8ac;
+--muted: #9a9288;
+--body:  #6e6660;
+--text:  #3a3530;
+--off:   #3a3530;
+--black: #1a1612;
+--white: #1a1612;
+--gold:  #8a6a2e;
+--gold2: #b08840;
+--nav-bg: rgba(245,242,237,.93);
+--out-bg: #e8e3db;
 }
 
 html { scroll-behavior: smooth; }
 
 body {
-font-family: ‘Bodoni Moda’, Georgia, serif;
-background: var(–bg);
-color: var(–body);
+font-family: 'Bodoni Moda', Georgia, serif;
+background: var(--bg);
+color: var(--body);
 overflow-x: hidden;
 -webkit-font-smoothing: antialiased;
 cursor: none;
@@ -1059,16 +1068,16 @@ transition: background .7s cubic-bezier(.4,0,.2,1), color .7s;
 
 /* GRAIN */
 body::before {
-content: ‘’;
+content: '';
 position: fixed; inset: 0; pointer-events: none; z-index: 300;
-background-image: url(“data:image/svg+xml,%3Csvg viewBox=‘0 0 512 512’ xmlns=‘http://www.w3.org/2000/svg’%3E%3Cfilter id=‘n’%3E%3CfeTurbulence type=‘fractalNoise’ baseFrequency=‘0.75’ numOctaves=‘4’ stitchTiles=‘stitch’/%3E%3C/filter%3E%3Crect width=‘100%25’ height=‘100%25’ filter=‘url(%23n)’ opacity=‘1’/%3E%3C/svg%3E”);
+background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
 background-size: 200px; opacity: .04; mix-blend-mode: overlay;
 }
 
 /* CURSOR */
 #cd {
 position: fixed; width: 6px; height: 6px;
-background: var(–gold); border-radius: 50%;
+background: var(--gold); border-radius: 50%;
 pointer-events: none; z-index: 9999;
 transform: translate(-50%,-50%);
 transition: background .7s;
@@ -1089,40 +1098,40 @@ nav {
 position: fixed; top:0; left:0; right:0; z-index:100;
 display: flex; align-items: center; justify-content: space-between;
 padding: 0 4rem; height: 68px;
-border-bottom: 1px solid var(–line);
-background: var(–nav-bg);
+border-bottom: 1px solid var(--line);
+background: var(--nav-bg);
 backdrop-filter: blur(20px);
 transition: background .7s, border-color .7s;
 }
 .nl {
-font-family: ‘Bodoni Moda’, Georgia, serif;
+font-family: 'Bodoni Moda', Georgia, serif;
 font-style: italic; font-weight: 300;
 font-size: 1.1rem; letter-spacing: .2em;
-color: var(–white); text-transform: uppercase;
+color: var(--white); text-transform: uppercase;
 transition: color .7s;
 }
-.nl b { font-style: normal; font-weight: 300; color: var(–gold); transition: color .7s; }
+.nl b { font-style: normal; font-weight: 300; color: var(--gold); transition: color .7s; }
 .nlinks { display: flex; gap: 3rem; list-style: none; }
 .nlinks a {
-font-family: ‘Fragment Mono’, monospace; font-size: .56rem;
+font-family: 'Fragment Mono', monospace; font-size: .56rem;
 letter-spacing: .25em; text-transform: uppercase;
-color: var(–muted); text-decoration: none;
+color: var(--muted); text-decoration: none;
 transition: color .4s;
 }
-.nlinks a:hover { color: var(–white); }
+.nlinks a:hover { color: var(--white); }
 
 .nav-right { display: flex; align-items: center; gap: 1.5rem; }
 
 /* STATUS */
 .nstat {
 display: flex; align-items: center; gap: .7rem;
-font-family: ‘Fragment Mono’, monospace; font-size: .54rem;
+font-family: 'Fragment Mono', monospace; font-size: .54rem;
 letter-spacing: .2em; text-transform: uppercase;
 }
-.nline { width: 16px; height: 1px; background: var(–muted); transition: background .8s; }
-.nline.on { background: var(–gold); }
-.ntxt { color: var(–muted); transition: color .8s; }
-.ntxt.on { color: var(–gold); }
+.nline { width: 16px; height: 1px; background: var(--muted); transition: background .8s; }
+.nline.on { background: var(--gold); }
+.ntxt { color: var(--muted); transition: color .8s; }
+.ntxt.on { color: var(--gold); }
 
 /* ── THEME TOGGLE ────────────────────────────────── */
 .toggle-wrap {
@@ -1130,9 +1139,9 @@ display: flex; align-items: center; gap: .8rem;
 cursor: none;
 }
 .toggle-lbl {
-font-family: ‘Fragment Mono’, monospace;
+font-family: 'Fragment Mono', monospace;
 font-size: .5rem; letter-spacing: .2em; text-transform: uppercase;
-color: var(–muted); transition: color .7s;
+color: var(--muted); transition: color .7s;
 user-select: none;
 }
 .toggle {
@@ -1142,24 +1151,24 @@ cursor: none;
 .toggle input { opacity: 0; width: 0; height: 0; }
 .toggle-track {
 position: absolute; inset: 0;
-background: var(–dim);
-border: 1px solid var(–muted);
+background: var(--dim);
+border: 1px solid var(--muted);
 border-radius: 11px;
 transition: background .5s, border-color .5s;
 cursor: none;
 }
-[data-theme=“light”] .toggle-track {
-background: var(–gold);
-border-color: var(–gold);
+[data-theme="light"] .toggle-track {
+background: var(--gold);
+border-color: var(--gold);
 }
 .toggle-thumb {
 position: absolute; top: 3px; left: 3px;
 width: 14px; height: 14px;
-background: var(–gold2);
+background: var(--gold2);
 border-radius: 50%;
 transition: transform .45s cubic-bezier(.4,0,.2,1), background .5s;
 }
-[data-theme=“light”] .toggle-thumb {
+[data-theme="light"] .toggle-thumb {
 transform: translateX(18px);
 background: #fff;
 }
@@ -1171,8 +1180,8 @@ transition: opacity .4s;
 }
 .icon-moon { right: 6px; opacity: 1; }
 .icon-sun  { left: 6px;  opacity: 0; }
-[data-theme=“light”] .icon-moon { opacity: 0; }
-[data-theme=“light”] .icon-sun  { opacity: 1; }
+[data-theme="light"] .icon-moon { opacity: 0; }
+[data-theme="light"] .icon-sun  { opacity: 1; }
 
 /* ── PAGE ────────────────────────────────────────── */
 .page { max-width: 1380px; margin: 0 auto; padding: 0 4rem; position: relative; z-index: 1; }
@@ -1184,237 +1193,237 @@ transition: opacity .4s;
 /* ── HERO ─────────────────────────────────────────── */
 .hero {
 min-height: 100vh; display: flex; flex-direction: column; justify-content: flex-end;
-padding: 68px 0 5.5rem; border-bottom: 1px solid var(–line);
+padding: 68px 0 5.5rem; border-bottom: 1px solid var(--line);
 transition: border-color .7s;
 }
 .h-eye {
-font-family: ‘Fragment Mono’, monospace; font-size: .54rem;
-letter-spacing: .4em; text-transform: uppercase; color: var(–muted);
+font-family: 'Fragment Mono', monospace; font-size: .54rem;
+letter-spacing: .4em; text-transform: uppercase; color: var(--muted);
 display: flex; align-items: center; gap: 1.2rem; margin-bottom: 2.5rem;
 transition: color .7s;
 }
-.h-eye::before { content: ‘’; width: 22px; height: 1px; background: var(–gold); transition: background .7s; }
+.h-eye::before { content: ''; width: 22px; height: 1px; background: var(--gold); transition: background .7s; }
 .h-title {
-font-family: ‘Bodoni Moda’, Georgia, serif;
+font-family: 'Bodoni Moda', Georgia, serif;
 font-weight: 300; font-style: italic;
 font-size: clamp(6rem, 14vw, 13rem);
 line-height: .84; letter-spacing: -.01em;
-color: var(–white); margin-bottom: 4.5rem;
+color: var(--white); margin-bottom: 4.5rem;
 transition: color .7s;
 }
 .h-title .sup {
 display: block; font-size: .32em; font-style: normal;
 letter-spacing: .38em; text-transform: uppercase;
-color: var(–muted); margin-bottom: .5em;
+color: var(--muted); margin-bottom: .5em;
 transition: color .7s;
 }
-.h-title .g { color: var(–gold2); transition: color .7s; }
+.h-title .g { color: var(--gold2); transition: color .7s; }
 
 .h-bottom {
 display: grid; grid-template-columns: repeat(4,1fr);
-gap: 1px; background: var(–line); border: 1px solid var(–line);
+gap: 1px; background: var(--line); border: 1px solid var(--line);
 transition: background .7s, border-color .7s;
 }
 .hm {
-background: var(–bg); padding: 2rem 1.8rem;
+background: var(--bg); padding: 2rem 1.8rem;
 transition: background .7s;
 }
 .hm-val {
-font-family: ‘Bodoni Moda’, Georgia, serif; font-style: italic; font-weight: 300;
-font-size: 3.2rem; line-height: 1; color: var(–white);
+font-family: 'Bodoni Moda', Georgia, serif; font-style: italic; font-weight: 300;
+font-size: 3.2rem; line-height: 1; color: var(--white);
 display: block; margin-bottom: .5rem; transition: color .7s;
 }
 .hm-lbl {
-font-family: ‘Fragment Mono’, monospace; font-size: .5rem;
-letter-spacing: .28em; text-transform: uppercase; color: var(–muted);
+font-family: 'Fragment Mono', monospace; font-size: .5rem;
+letter-spacing: .28em; text-transform: uppercase; color: var(--muted);
 transition: color .7s;
 }
 
 /* ── DIVIDER ─────────────────────────────────────── */
 .sdiv { display:flex; align-items:center; gap:1.5rem; padding:5rem 0 3.5rem; }
 .sdiv-lbl {
-font-family:‘Fragment Mono’,monospace; font-size:.52rem;
-letter-spacing:.4em; text-transform:uppercase; color:var(–muted);
+font-family:'Fragment Mono',monospace; font-size:.52rem;
+letter-spacing:.4em; text-transform:uppercase; color:var(--muted);
 white-space:nowrap; flex-shrink:0; transition:color .7s;
 }
-.sdiv-line { flex:1; height:1px; background:var(–line); transition:background .7s; }
-.sdiv-num { font-family:‘Fragment Mono’,monospace; font-size:.5rem; color:var(–dim); flex-shrink:0; transition:color .7s; }
+.sdiv-line { flex:1; height:1px; background:var(--line); transition:background .7s; }
+.sdiv-num { font-family:'Fragment Mono',monospace; font-size:.5rem; color:var(--dim); flex-shrink:0; transition:color .7s; }
 
 /* ── MONITOR ─────────────────────────────────────── */
 .mon-grid {
 display:grid; grid-template-columns:repeat(5,1fr);
-gap:1px; background:var(–line); border:1px solid var(–line);
+gap:1px; background:var(--line); border:1px solid var(--line);
 margin-bottom:1px; transition:background .7s, border-color .7s;
 }
 .mc {
-background:var(–bg); padding:2.5rem 1.8rem;
+background:var(--bg); padding:2.5rem 1.8rem;
 position:relative; overflow:hidden;
 transition:background .5s;
 }
-.mc:hover { background:var(–s0); }
+.mc:hover { background:var(--s0); }
 .mc::after {
-content:’’; position:absolute; bottom:0; left:0; right:0; height:1px;
-background:var(–gold); opacity:0; transition:opacity .5s;
+content:''; position:absolute; bottom:0; left:0; right:0; height:1px;
+background:var(--gold); opacity:0; transition:opacity .5s;
 }
 .mc:hover::after { opacity:1; }
 .mc-val {
-font-family:‘Bodoni Moda’,Georgia,serif; font-style:italic; font-weight:300;
-font-size:4rem; line-height:1; color:var(–white); display:block; margin-bottom:.6rem;
+font-family:'Bodoni Moda',Georgia,serif; font-style:italic; font-weight:300;
+font-size:4rem; line-height:1; color:var(--white); display:block; margin-bottom:.6rem;
 transition:color .5s;
 }
-.mc:hover .mc-val { color:var(–gold2); }
+.mc:hover .mc-val { color:var(--gold2); }
 .mc-lbl {
-font-family:‘Fragment Mono’,monospace; font-size:.5rem;
-letter-spacing:.28em; text-transform:uppercase; color:var(–muted);
+font-family:'Fragment Mono',monospace; font-size:.5rem;
+letter-spacing:.28em; text-transform:uppercase; color:var(--muted);
 transition:color .7s;
 }
 
 .mon-quota {
-background:var(–bg); border:1px solid var(–line); border-top:none;
+background:var(--bg); border:1px solid var(--line); border-top:none;
 padding:1.8rem 2.2rem; margin-bottom:1px;
 transition:background .7s, border-color .7s;
 }
 .quota-head { display:flex; justify-content:space-between; margin-bottom:1rem; }
-.quota-lbl { font-family:‘Fragment Mono’,monospace; font-size:.5rem; letter-spacing:.3em; text-transform:uppercase; color:var(–muted); transition:color .7s; }
-.quota-val { font-family:‘Fragment Mono’,monospace; font-size:.54rem; color:var(–body); transition:color .7s; }
-.qtrack { width:100%; height:1px; background:var(–dim); transition:background .7s; }
-.qfill  { height:100%; background:var(–gold); box-shadow:0 0 8px rgba(184,150,90,.35); transition:width 2s cubic-bezier(.25,.46,.45,.94), background .7s; }
+.quota-lbl { font-family:'Fragment Mono',monospace; font-size:.5rem; letter-spacing:.3em; text-transform:uppercase; color:var(--muted); transition:color .7s; }
+.quota-val { font-family:'Fragment Mono',monospace; font-size:.54rem; color:var(--body); transition:color .7s; }
+.qtrack { width:100%; height:1px; background:var(--dim); transition:background .7s; }
+.qfill  { height:100%; background:var(--gold); box-shadow:0 0 8px rgba(184,150,90,.35); transition:width 2s cubic-bezier(.25,.46,.45,.94), background .7s; }
 
 .mon-sess {
-background:var(–bg); border:1px solid var(–line); border-top:none;
+background:var(--bg); border:1px solid var(--line); border-top:none;
 padding:1.4rem 2.2rem; display:flex; align-items:center; justify-content:space-between;
 transition:background .7s, border-color .7s;
 }
 .sb {
-font-family:‘Fragment Mono’,monospace; font-size:.54rem;
+font-family:'Fragment Mono',monospace; font-size:.54rem;
 letter-spacing:.18em; text-transform:uppercase;
-padding:.35rem 1rem; border:1px solid var(–muted); color:var(–muted);
+padding:.35rem 1rem; border:1px solid var(--muted); color:var(--muted);
 transition:all .6s;
 }
-.sb.ok  { border-color:var(–gold); color:var(–gold); }
+.sb.ok  { border-color:var(--gold); color:var(--gold); }
 .sb.bad { border-color:#c06060; color:#c06060; }
-.sp { font-family:‘Fragment Mono’,monospace; font-size:.52rem; color:var(–muted); transition:color .7s; }
+.sp { font-family:'Fragment Mono',monospace; font-size:.52rem; color:var(--muted); transition:color .7s; }
 
 /* ── WORKSPACE ───────────────────────────────────── */
 .work {
 display:grid; grid-template-columns:1fr 1fr;
-gap:1px; background:var(–line); border:1px solid var(–line);
+gap:1px; background:var(--line); border:1px solid var(--line);
 transition:background .7s, border-color .7s;
 }
 .ep-panel, .con-panel {
-background:var(–bg); padding:2.5rem; transition:background .7s;
+background:var(--bg); padding:2.5rem; transition:background .7s;
 }
 
 .ep-hdr {
 display:grid; grid-template-columns:70px 1fr 100px;
-padding:.8rem 0 .8rem .5rem; border-bottom:1px solid var(–line); margin-bottom:.5rem;
+padding:.8rem 0 .8rem .5rem; border-bottom:1px solid var(--line); margin-bottom:.5rem;
 transition:border-color .7s;
 }
 .ep-hdr span {
-font-family:‘Fragment Mono’,monospace; font-size:.48rem;
-letter-spacing:.35em; text-transform:uppercase; color:var(–dim); transition:color .7s;
+font-family:'Fragment Mono',monospace; font-size:.48rem;
+letter-spacing:.35em; text-transform:uppercase; color:var(--dim); transition:color .7s;
 }
 .ep-hdr span:last-child { text-align:right; }
 
 .epr {
 display:grid; grid-template-columns:70px 1fr 100px; align-items:center;
-padding:1.25rem .5rem; border-bottom:1px solid var(–line);
+padding:1.25rem .5rem; border-bottom:1px solid var(--line);
 cursor:none; position:relative; overflow:hidden; transition:background .4s;
 }
 .epr:last-child { border-bottom:none; }
-.epr:hover { background:var(–s0); }
+.epr:hover { background:var(--s0); }
 .epr::before {
-content:’’; position:absolute; left:0; top:0; bottom:0; width:1px;
-background:var(–gold); opacity:0; transition:opacity .4s;
+content:''; position:absolute; left:0; top:0; bottom:0; width:1px;
+background:var(--gold); opacity:0; transition:opacity .4s;
 }
 .epr:hover::before { opacity:1; }
-.em { font-family:‘Fragment Mono’,monospace; font-size:.5rem; letter-spacing:.1em; color:var(–gold); padding-left:.5rem; transition:color .7s; }
-.ep { font-family:‘Fragment Mono’,monospace; font-size:.68rem; color:var(–text); transition:color .7s; }
-.ep .p { color:var(–white); transition:color .7s; }
-.ep .q { color:var(–muted); transition:color .7s; }
-.ea { text-align:right; font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.28em; text-transform:uppercase; color:var(–dim); transition:color .4s; }
-.epr:hover .ea { color:var(–gold); }
+.em { font-family:'Fragment Mono',monospace; font-size:.5rem; letter-spacing:.1em; color:var(--gold); padding-left:.5rem; transition:color .7s; }
+.ep { font-family:'Fragment Mono',monospace; font-size:.68rem; color:var(--text); transition:color .7s; }
+.ep .p { color:var(--white); transition:color .7s; }
+.ep .q { color:var(--muted); transition:color .7s; }
+.ea { text-align:right; font-family:'Fragment Mono',monospace; font-size:.48rem; letter-spacing:.28em; text-transform:uppercase; color:var(--dim); transition:color .4s; }
+.epr:hover .ea { color:var(--gold); }
 
 .con-head {
 display:flex; align-items:center; justify-content:space-between;
-margin-bottom:1.8rem; padding-bottom:1.4rem; border-bottom:1px solid var(–line);
+margin-bottom:1.8rem; padding-bottom:1.4rem; border-bottom:1px solid var(--line);
 transition:border-color .7s;
 }
-.con-lbl { font-family:‘Fragment Mono’,monospace; font-size:.52rem; letter-spacing:.3em; text-transform:uppercase; color:var(–muted); transition:color .7s; }
-.con-time { font-family:‘Fragment Mono’,monospace; font-size:.52rem; color:var(–dim); transition:color .7s; }
+.con-lbl { font-family:'Fragment Mono',monospace; font-size:.52rem; letter-spacing:.3em; text-transform:uppercase; color:var(--muted); transition:color .7s; }
+.con-time { font-family:'Fragment Mono',monospace; font-size:.52rem; color:var(--dim); transition:color .7s; }
 .con-row { display:flex; gap:1px; margin-bottom:1.4rem; }
 .con-input {
-flex:1; background:var(–s0); border:1px solid var(–line); border-right:none;
-color:var(–white); font-family:‘Fragment Mono’,monospace; font-size:.66rem;
+flex:1; background:var(--s0); border:1px solid var(--line); border-right:none;
+color:var(--white); font-family:'Fragment Mono',monospace; font-size:.66rem;
 padding:.8rem 1.1rem; outline:none; transition:border-color .4s, background .7s, color .7s;
 }
-.con-input:focus { border-color:var(–gold); }
+.con-input:focus { border-color:var(--gold); }
 .con-btn {
-background:var(–gold); color:var(–bg); border:none;
-font-family:‘Fragment Mono’,monospace; font-size:.5rem; font-weight:500;
+background:var(--gold); color:var(--bg); border:none;
+font-family:'Fragment Mono',monospace; font-size:.5rem; font-weight:500;
 letter-spacing:.28em; text-transform:uppercase;
 padding:0 1.5rem; cursor:none; transition:background .35s, color .7s;
 }
-.con-btn:hover { background:var(–gold2); }
+.con-btn:hover { background:var(--gold2); }
 .con-out {
-background:var(–out-bg); border:1px solid var(–line);
+background:var(--out-bg); border:1px solid var(--line);
 padding:1.3rem; height:360px; overflow-y:auto; position:relative;
 transition:background .7s, border-color .7s;
 }
 .con-out::-webkit-scrollbar { width:1px; }
-.con-out::-webkit-scrollbar-thumb { background:var(–dim); }
+.con-out::-webkit-scrollbar-thumb { background:var(--dim); }
 .con-pre {
-font-family:‘Fragment Mono’,monospace; font-size:.62rem;
-line-height:2; color:var(–muted); white-space:pre-wrap; word-break:break-all;
+font-family:'Fragment Mono',monospace; font-size:.62rem;
+line-height:2; color:var(--muted); white-space:pre-wrap; word-break:break-all;
 transition:color .7s;
 }
-.otag { position:absolute; top:.8rem; right:.8rem; font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.18em; text-transform:uppercase; color:var(–dim); }
-.otag.ok { color:var(–gold); }
+.otag { position:absolute; top:.8rem; right:.8rem; font-family:'Fragment Mono',monospace; font-size:.48rem; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); }
+.otag.ok { color:var(--gold); }
 .otag.er { color:#c06060; }
 
 /* ── CONTACT ─────────────────────────────────────── */
 .ct-grid {
 display:grid; grid-template-columns:1fr 1fr;
-gap:1px; background:var(–line); border:1px solid var(–line);
+gap:1px; background:var(--line); border:1px solid var(--line);
 transition:background .7s, border-color .7s;
 }
-.ct-l,.ct-r { background:var(–bg); padding:4rem; transition:background .7s; }
+.ct-l,.ct-r { background:var(--bg); padding:4rem; transition:background .7s; }
 
 .ct-over {
-font-family:‘Fragment Mono’,monospace; font-size:.52rem;
-letter-spacing:.4em; text-transform:uppercase; color:var(–gold);
+font-family:'Fragment Mono',monospace; font-size:.52rem;
+letter-spacing:.4em; text-transform:uppercase; color:var(--gold);
 display:flex; align-items:center; gap:1rem; margin-bottom:2rem; transition:color .7s;
 }
-.ct-over::before { content:’’; width:18px; height:1px; background:var(–gold); transition:background .7s; }
+.ct-over::before { content:''; width:18px; height:1px; background:var(--gold); transition:background .7s; }
 .ct-title {
-font-family:‘Bodoni Moda’,Georgia,serif; font-weight:300; font-style:italic;
+font-family:'Bodoni Moda',Georgia,serif; font-weight:300; font-style:italic;
 font-size:clamp(3.5rem,7vw,6rem); line-height:.86; letter-spacing:-.01em;
-color:var(–white); margin-bottom:2rem; transition:color .7s;
+color:var(--white); margin-bottom:2rem; transition:color .7s;
 }
-.ct-title .a { color:var(–gold2); transition:color .7s; }
-.ct-body { font-family:‘Bodoni Moda’,Georgia,serif; font-weight:300; font-size:1.05rem; line-height:1.85; color:var(–body); max-width:360px; margin-bottom:2.5rem; transition:color .7s; }
+.ct-title .a { color:var(--gold2); transition:color .7s; }
+.ct-body { font-family:'Bodoni Moda',Georgia,serif; font-weight:300; font-size:1.05rem; line-height:1.85; color:var(--body); max-width:360px; margin-bottom:2.5rem; transition:color .7s; }
 
-.ig { display:flex; align-items:center; gap:1.5rem; padding:1.4rem 1.8rem; border:1px solid var(–line); text-decoration:none; background:var(–s0); transition:border-color .5s, padding-left .4s, background .7s; }
-.ig:hover { border-color:var(–gold); padding-left:2.2rem; background:var(–bg); }
-.ig-ic { width:38px; height:38px; border:1px solid var(–muted); display:flex; align-items:center; justify-content:center; color:var(–muted); flex-shrink:0; transition:border-color .5s, color .5s; }
-.ig:hover .ig-ic { border-color:var(–gold); color:var(–gold); }
-.ig-handle { font-family:‘Bodoni Moda’,Georgia,serif; font-style:italic; font-weight:300; font-size:1.35rem; color:var(–white); transition:color .7s; }
-.ig-sub { font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.22em; text-transform:uppercase; color:var(–muted); margin-top:.2rem; transition:color .7s; }
-.ig-ar { margin-left:auto; color:var(–dim); transition:color .4s, transform .4s; }
-.ig:hover .ig-ar { color:var(–gold); transform:translateX(5px); }
+.ig { display:flex; align-items:center; gap:1.5rem; padding:1.4rem 1.8rem; border:1px solid var(--line); text-decoration:none; background:var(--s0); transition:border-color .5s, padding-left .4s, background .7s; }
+.ig:hover { border-color:var(--gold); padding-left:2.2rem; background:var(--bg); }
+.ig-ic { width:38px; height:38px; border:1px solid var(--muted); display:flex; align-items:center; justify-content:center; color:var(--muted); flex-shrink:0; transition:border-color .5s, color .5s; }
+.ig:hover .ig-ic { border-color:var(--gold); color:var(--gold); }
+.ig-handle { font-family:'Bodoni Moda',Georgia,serif; font-style:italic; font-weight:300; font-size:1.35rem; color:var(--white); transition:color .7s; }
+.ig-sub { font-family:'Fragment Mono',monospace; font-size:.48rem; letter-spacing:.22em; text-transform:uppercase; color:var(--muted); margin-top:.2rem; transition:color .7s; }
+.ig-ar { margin-left:auto; color:var(--dim); transition:color .4s, transform .4s; }
+.ig:hover .ig-ar { color:var(--gold); transform:translateX(5px); }
 
-.spec-row { display:flex; justify-content:space-between; align-items:baseline; padding:1rem 0; border-bottom:1px solid var(–line); transition:border-color .7s; }
-.spec-row:first-child { border-top:1px solid var(–line); }
-.sk { font-family:‘Fragment Mono’,monospace; font-size:.52rem; letter-spacing:.22em; text-transform:uppercase; color:var(–muted); transition:color .7s; }
-.sv { font-family:‘Bodoni Moda’,Georgia,serif; font-size:1rem; font-style:italic; font-weight:300; color:var(–text); transition:color .7s; }
-.sv.go { color:var(–gold2); }
+.spec-row { display:flex; justify-content:space-between; align-items:baseline; padding:1rem 0; border-bottom:1px solid var(--line); transition:border-color .7s; }
+.spec-row:first-child { border-top:1px solid var(--line); }
+.sk { font-family:'Fragment Mono',monospace; font-size:.52rem; letter-spacing:.22em; text-transform:uppercase; color:var(--muted); transition:color .7s; }
+.sv { font-family:'Bodoni Moda',Georgia,serif; font-size:1rem; font-style:italic; font-weight:300; color:var(--text); transition:color .7s; }
+.sv.go { color:var(--gold2); }
 
-.vstamp { display:inline-flex; align-items:center; gap:1rem; font-family:‘Fragment Mono’,monospace; font-size:.52rem; letter-spacing:.25em; text-transform:uppercase; color:var(–muted); padding:.9rem 1.4rem; border:1px solid var(–line); margin-top:1.8rem; transition:border-color .7s, color .7s; }
-.vstamp span { color:var(–gold); transition:color .7s; }
+.vstamp { display:inline-flex; align-items:center; gap:1rem; font-family:'Fragment Mono',monospace; font-size:.52rem; letter-spacing:.25em; text-transform:uppercase; color:var(--muted); padding:.9rem 1.4rem; border:1px solid var(--line); margin-top:1.8rem; transition:border-color .7s, color .7s; }
+.vstamp span { color:var(--gold); transition:color .7s; }
 
-footer { padding:2.5rem 0; margin-top:1px; border-top:1px solid var(–line); display:flex; align-items:center; justify-content:space-between; transition:border-color .7s; }
-.fsig { font-family:‘Bodoni Moda’,Georgia,serif; font-style:italic; font-weight:300; font-size:1.5rem; letter-spacing:.08em; color:var(–dim); transition:color .7s; }
-.fcopy { font-family:‘Fragment Mono’,monospace; font-size:.48rem; letter-spacing:.28em; text-transform:uppercase; color:var(–dim); transition:color .7s; }
+footer { padding:2.5rem 0; margin-top:1px; border-top:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; transition:border-color .7s; }
+.fsig { font-family:'Bodoni Moda',Georgia,serif; font-style:italic; font-weight:300; font-size:1.5rem; letter-spacing:.08em; color:var(--dim); transition:color .7s; }
+.fcopy { font-family:'Fragment Mono',monospace; font-size:.48rem; letter-spacing:.28em; text-transform:uppercase; color:var(--dim); transition:color .7s; }
 
 @media(max-width:900px){
 .page{padding:0 1.4rem;} nav{padding:0 1.4rem;} .nlinks{display:none;}
@@ -1767,15 +1776,15 @@ document.getElementById('ci').addEventListener('keydown', e => {
 </html>
 `;
 
-app.get(’/’, (req, res) => {
-res.setHeader(‘Content-Type’, ‘text/html; charset=utf-8’);
+app.get('/', (req, res) => {
+res.setHeader('Content-Type', 'text/html; charset=utf-8');
 res.send(DASHBOARD_HTML);
 });
 
-app.use((req, res) => res.status(404).json({ ok: false, error: ‘Not found’, path: req.path }));
+app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found', path: req.path }));
 app.use((err, req, res, next) => {
-log.error(‘Express error’, { error: err.message });
-if (!res.headersSent) res.status(500).json({ ok: false, error: ‘Internal server error’ });
+log.error('Express error', { error: err.message });
+if (!res.headersSent) res.status(500).json({ ok: false, error: 'Internal server error' });
 });
 
 // =============================================================================
@@ -1784,7 +1793,7 @@ if (!res.headersSent) res.status(500).json({ ok: false, error: ‘Internal serve
 setInterval(() => {
 const used = process.memoryUsage().heapUsed;
 if (used > CFG.MEMORY_LIMIT * CFG.MEMORY_WARN) {
-log.warn(‘Memory high, flushing caches’, { mb: (used / 1024 / 1024).toFixed(1) });
+log.warn('Memory high, flushing caches', { mb: (used / 1024 / 1024).toFixed(1) });
 searchCache.flushAll(); dlCache.flushAll();
 if (global.gc) global.gc();
 }
@@ -1794,16 +1803,16 @@ setInterval(() => warmup(),               CFG.WARMUP_INTERVAL);
 setInterval(() => fetchFreeProxies(true), 30 * 60 * 1000);
 setInterval(() => { workingFreeProxies = []; }, 20 * 60 * 1000);
 setInterval(async () => {
-log.info(‘Refreshing OS API token…’);
-osToken = ‘’;
+log.info('Refreshing OS API token…');
+osToken = '';
 await getOsToken();
 }, 22 * 60 * 60 * 1000);
 
-if (PLATFORM !== ‘local’ && !IS_SERVERLESS) {
+if (PLATFORM !== 'local' && !IS_SERVERLESS) {
 setInterval(() => {
-axios.get(BASE_URL + ‘/ping’, { timeout: 8000 })
-.then(() => log.debug(‘Self-ping OK’))
-.catch(e => log.warn(‘Self-ping failed’, { error: e.message }));
+axios.get(BASE_URL + '/ping', { timeout: 8000 })
+.then(() => log.debug('Self-ping OK'))
+.catch(e => log.warn('Self-ping failed', { error: e.message }));
 }, CFG.PING_INTERVAL);
 }
 
@@ -1812,23 +1821,28 @@ axios.get(BASE_URL + ‘/ping’, { timeout: 8000 })
 // =============================================================================
 let _server;
 const shutdown = signal => {
-log.info(‘Shutting down’, { signal });
-if (_server) _server.close(() => { log.info(‘Server closed’); process.exit(0); });
+log.info('Shutting down', { signal });
+if (_server) _server.close(() => { log.info('Server closed'); process.exit(0); });
 else process.exit(0);
 setTimeout(() => process.exit(1), 10000);
 };
-process.on(‘SIGTERM’, () => shutdown(‘SIGTERM’));
-process.on(‘SIGINT’,  () => shutdown(‘SIGINT’));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
 
 // =============================================================================
 //  STARTUP
 // =============================================================================
 async function startup() {
-log.info(‘VOID CINEMA FINAL BOSS — starting’, { platform: PLATFORM });
+log.info('VOID CINEMA FINAL BOSS — starting', { platform: PLATFORM });
 
 PROXY_POOL = buildProxyPool();
-if (PROXY_POOL.length) log.info(‘Proxy pool ready’, { count: PROXY_POOL.length });
-else log.warn(‘No env proxies configured’);
+if (PROXY_POOL.length) log.info('Proxy pool ready', { count: PROXY_POOL.length });
+else log.warn('No env proxies — direct connections only, may be blocked');
+
+if (!CFG.OS_API_KEY || !CFG.OS_USERNAME || !CFG.OS_PASSWORD)
+log.warn('OS_API_KEY/OS_USERNAME/OS_PASSWORD not set — official API (S0) disabled. Set in Koyeb env vars.');
+if (!CFG.WYZIE_KEY) log.warn('WYZIE_KEY not set — S3 disabled. Get free: sub.wyzie.io/redeem');
+if (!CFG.OMDB_KEY)  log.warn('OMDB_API_KEY not set — IMDB lookup limited. Get free: omdbapi.com');
 
 // Start all init tasks in parallel — faster cold start
 await Promise.allSettled([
@@ -1837,15 +1851,15 @@ fetchFreeProxies(true),
 warmup(),
 ]);
 
-if (!CFG.WYZIE_KEY) log.warn(‘WYZIE_KEY not set — S3 disabled. Get free key: sub.wyzie.io/redeem’);
-if (!CFG.OMDB_KEY)  log.warn(‘OMDB_API_KEY not set — IMDB lookup limited. Get free: omdbapi.com’);
+if (!CFG.WYZIE_KEY) log.warn('WYZIE_KEY not set — S3 disabled. Get free key: sub.wyzie.io/redeem');
+if (!CFG.OMDB_KEY)  log.warn('OMDB_API_KEY not set — IMDB lookup limited. Get free: omdbapi.com');
 
 _server = app.listen(PORT, () => {
-log.info(‘Server ready’, { url: BASE_URL });
-log.info(’Search:    ’ + BASE_URL + ‘/search?q=Inception’);
-log.info(’Dashboard: ’ + BASE_URL + ‘/’);
+log.info('Server ready', { url: BASE_URL });
+log.info('Search:    ' + BASE_URL + '/search?q=Inception');
+log.info('Dashboard: ' + BASE_URL + '/');
 });
 }
 
-startup().catch(err => { log.error(‘Fatal startup error’, { error: err.message }); process.exit(1); });
+startup().catch(err => { log.error('Fatal startup error', { error: err.message }); process.exit(1); });
 if (IS_SERVERLESS) module.exports = app;
