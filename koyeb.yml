@@ -1,26 +1,34 @@
-name: void-cinema-subtitle-api
+name: void-cinema-api
 
 services:
   - name: api
     type: web
     git:
-      repository: github.com/munax07/Subtitle-api
+      repository: github.com/munax07/Opensub-Api
       branch: main
     build:
+      builder: buildpack
       build_command: npm install
-      run_command: npm start
+    run:
+      command: node server.js
     ports:
       - port: 3000
         protocol: http
-    healthchecks:
-      - path: /health
-        port: 3000
-        type: http
+    env:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+    health_checks:
+      - grace_period: 20
         interval: 30
+        restart_limit: 3
         timeout: 10
+        path: /health
+        port: 3000
+        protocol: http
     scaling:
       min: 1
       max: 1
-    regions:
-      - was
-    instance_type: free
+    instance_types:
+      - nano
